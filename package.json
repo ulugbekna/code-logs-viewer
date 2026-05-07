@@ -3,6 +3,12 @@
   "displayName": "Code Logs Viewer",
   "description": "Rich webview for VS Code Output-pane log files (filtering, search, timeline, JSON).",
   "version": "0.0.1",
+  "publisher": "ulugbekna",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ulugbekna/code-logs-viewer"
+  },
   "engines": {
     "vscode": "^1.118.0"
   },
