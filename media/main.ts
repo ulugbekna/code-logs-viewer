@@ -425,19 +425,26 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
 
     const head = document.createElement('div');
     head.className = 'row-head';
+    if (hasBody) { head.classList.add('expandable'); }
     head.innerHTML = `
-		<span class="caret">${expanded ? '▾' : '▸'}</span>
+		<span class="caret">${hasBody ? (expanded ? '▾' : '▸') : ''}</span>
 		<span class="ts">${e.tsRaw.slice(11)}</span>
 		<span class="badge level-${e.level}">${e.level}</span>
 		${e.source ? `<span class="src-chip" data-src="${escapeHtml(e.source)}">${escapeHtml(e.source)}</span>` : ''}
 		<span class="msg">${highlight(e.message)}</span>`;
     row.appendChild(head);
 
-    head.addEventListener('click', ev => {
-        const t = ev.target as HTMLElement;
-        if (t.classList.contains('src-chip')) { return; }
-        toggleExpand(e.id);
-    });
+    if (hasBody) {
+        // Listener on the row (not just head) so clicks anywhere in the
+        // header strip toggle reliably. Clicks inside the body or on the
+        // source chip are ignored.
+        row.addEventListener('click', ev => {
+            const t = ev.target as HTMLElement;
+            if (t.closest('.row-body')) { return; }
+            if (t.classList.contains('src-chip')) { return; }
+            toggleExpand(e.id);
+        });
+    }
     const chip = head.querySelector('.src-chip') as HTMLElement | null;
     if (chip) {
         chip.addEventListener('click', ev => {
@@ -450,10 +457,10 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
         });
     }
 
-    if (expanded) {
+    if (expanded && hasBody) {
         const bodyEl = document.createElement('div');
         bodyEl.className = 'row-body';
-        if (hasBody && e.bodyKind === 'json') {
+        if (e.bodyKind === 'json') {
             const joined = e.body.join('\n').trim();
             try {
                 const parsed = JSON.parse(joined);
@@ -461,10 +468,8 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
             } catch {
                 bodyEl.appendChild(renderTextBody(e.body));
             }
-        } else if (hasBody) {
-            bodyEl.appendChild(renderTextBody(e.body));
         } else {
-            bodyEl.appendChild(renderDetails(e));
+            bodyEl.appendChild(renderTextBody(e.body));
         }
         row.appendChild(bodyEl);
     }
@@ -488,19 +493,6 @@ function renderTextBody(body: string[]): HTMLElement {
     pre.className = 'body-text';
     pre.innerHTML = body.map(l => highlight(l)).join('\n');
     return pre;
-}
-
-function renderDetails(e: LogEntry): HTMLElement {
-    const wrap = document.createElement('div');
-    wrap.className = 'details';
-    const rows: Array<[string, string]> = [
-        ['Time', e.tsRaw || '(none)'],
-        ['Level', e.level],
-        ['Source', e.source ?? '(none)'],
-        ['Message', e.message],
-    ];
-    wrap.innerHTML = rows.map(([k, v]) => `<div class="detail-row"><span class="detail-key">${k}</span><span class="detail-val">${highlight(v)}</span></div>`).join('');
-    return wrap;
 }
 
 function renderJson(value: unknown, key?: string): HTMLElement {
