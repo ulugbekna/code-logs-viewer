@@ -52,6 +52,28 @@ body {
 .icon-btn:hover, .toolbar button:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.15)); }
 .icon-btn.active { background: var(--vscode-inputOption-activeBackground, rgba(100,150,255,0.25)); border-color: var(--vscode-inputOption-activeBorder, transparent); color: var(--vscode-inputOption-activeForeground, inherit); }
 
+/* Segmented mode toggle: Highlight | Filter */
+.seg { display: inline-flex; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 3px; overflow: hidden; margin-left: 4px; }
+.seg-btn {
+	background: transparent;
+	color: var(--vscode-foreground);
+	border: none;
+	padding: 3px 8px;
+	cursor: pointer;
+	font-size: 11px;
+	font-family: var(--vscode-font-family);
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+.seg-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.15)); }
+.seg-btn.active {
+	background: var(--vscode-inputOption-activeBackground, rgba(100,150,255,0.25));
+	color: var(--vscode-inputOption-activeForeground, inherit);
+}
+.seg-btn.active:hover {
+	background: var(--vscode-inputOption-activeBackground, rgba(100,150,255,0.25));
+	box-shadow: inset 0 0 0 999px rgba(0, 0, 0, 0.2);
+}
+
 #copy-filtered, #clear-filters {
 	background: var(--vscode-button-secondaryBackground, transparent);
 	color: var(--vscode-button-secondaryForeground, inherit);

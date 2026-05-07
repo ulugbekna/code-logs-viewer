@@ -30,6 +30,7 @@ interface PersistedState {
     levels: Record<string, boolean>;
     sources: Record<string, boolean>;
     search: string;
+    searchMode: 'highlight' | 'filter';
     regex: boolean;
     caseSensitive: boolean;
     wholeWord: boolean;
@@ -70,6 +71,7 @@ function loadState(): PersistedState {
         levels: s?.levels ?? {},
         sources: s?.sources ?? {},
         search: s?.search ?? '',
+        searchMode: s?.searchMode ?? 'highlight',
         regex: s?.regex ?? false,
         caseSensitive: s?.caseSensitive ?? false,
         wholeWord: s?.wholeWord ?? false,
@@ -94,6 +96,10 @@ root.innerHTML = `
 			<button class="icon-btn" id="opt-case" title="Match Case (Alt+C)">Aa</button>
 			<button class="icon-btn" id="opt-word" title="Match Whole Word (Alt+W)">ab</button>
 			<button class="icon-btn" id="opt-regex" title="Use Regular Expression (Alt+R)">.*</button>
+			<span class="seg" role="group" aria-label="Search behavior">
+				<button class="seg-btn" id="mode-highlight" title="Show all rows; highlight matches">Highlight</button>
+				<button class="seg-btn" id="mode-filter" title="Show only rows that match">Filter</button>
+			</span>
 			<span id="match-count" class="muted"></span>
 			<button class="icon-btn" id="match-prev" title="Previous match (Shift+Enter)">↑</button>
 			<button class="icon-btn" id="match-next" title="Next match (Enter)">↓</button>
@@ -133,6 +139,8 @@ const els = {
     optCase: $<HTMLButtonElement>('opt-case'),
     optWord: $<HTMLButtonElement>('opt-word'),
     optRegex: $<HTMLButtonElement>('opt-regex'),
+    modeHighlight: $<HTMLButtonElement>('mode-highlight'),
+    modeFilter: $<HTMLButtonElement>('mode-filter'),
     matchCount: $('match-count'),
     matchPrev: $<HTMLButtonElement>('match-prev'),
     matchNext: $<HTMLButtonElement>('match-next'),
@@ -152,6 +160,7 @@ els.search.value = state.persisted.search;
 toggleBtn(els.optCase, state.persisted.caseSensitive);
 toggleBtn(els.optWord, state.persisted.wholeWord);
 toggleBtn(els.optRegex, state.persisted.regex);
+updateModeBtn();
 
 // ---------- Events ----------
 window.addEventListener('message', e => onHostMessage(e.data as HostToWebview));
@@ -178,6 +187,15 @@ els.search.addEventListener('keydown', e => {
 els.optCase.addEventListener('click', () => { state.persisted.caseSensitive = !state.persisted.caseSensitive; toggleBtn(els.optCase, state.persisted.caseSensitive); saveState(); recomputeAndRender(); });
 els.optWord.addEventListener('click', () => { state.persisted.wholeWord = !state.persisted.wholeWord; toggleBtn(els.optWord, state.persisted.wholeWord); saveState(); recomputeAndRender(); });
 els.optRegex.addEventListener('click', () => { state.persisted.regex = !state.persisted.regex; toggleBtn(els.optRegex, state.persisted.regex); saveState(); recomputeAndRender(); });
+function setSearchMode(mode: 'highlight' | 'filter'): void {
+    if (state.persisted.searchMode === mode) { return; }
+    state.persisted.searchMode = mode;
+    updateModeBtn();
+    saveState();
+    recomputeAndRender();
+}
+els.modeHighlight.addEventListener('click', () => setSearchMode('highlight'));
+els.modeFilter.addEventListener('click', () => setSearchMode('filter'));
 els.matchPrev.addEventListener('click', () => gotoMatch(-1));
 els.matchNext.addEventListener('click', () => gotoMatch(+1));
 els.copyFiltered.addEventListener('click', copyFiltered);
@@ -234,6 +252,7 @@ function recompute(): void {
     const tMin = state.persisted.timeMin;
     const tMax = state.persisted.timeMax;
     const matcher = buildSearchMatcher();
+    const filterBySearch = state.persisted.searchMode === 'filter';
 
     const out: LogEntry[] = [];
     const matchPositions: number[] = [];
@@ -242,8 +261,9 @@ function recompute(): void {
         if (!anySource && !(e.source && sources[e.source])) { continue; }
         if (tMin !== undefined && e.ts && e.ts < tMin) { continue; }
         if (tMax !== undefined && e.ts && e.ts > tMax) { continue; }
-        if (matcher && !matcher(entryText(e))) { continue; }
-        if (matcher) { matchPositions.push(out.length); }
+        const isMatch = matcher ? matcher(entryText(e)) : false;
+        if (matcher && filterBySearch && !isMatch) { continue; }
+        if (isMatch) { matchPositions.push(out.length); }
         out.push(e);
     }
     state.filtered = out;
@@ -742,6 +762,11 @@ function showToast(text: string): void {
 
 // ---------- Helpers ----------
 function toggleBtn(b: HTMLButtonElement, on: boolean): void { b.classList.toggle('active', on); }
+function updateModeBtn(): void {
+    const isFilter = state.persisted.searchMode === 'filter';
+    els.modeHighlight.classList.toggle('active', !isFilter);
+    els.modeFilter.classList.toggle('active', isFilter);
+}
 
 // ---------- Resize ----------
 window.addEventListener('resize', () => { renderMinimap(); renderListWindow(); });
