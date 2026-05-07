@@ -150,10 +150,10 @@ body {
 	display: flex; align-items: center; gap: 8px;
 	padding: var(--row-padding);
 	white-space: nowrap;
-	cursor: default;
+	cursor: pointer;
 	min-height: 22px;
 }
-.row-head .caret { width: 10px; color: var(--vscode-descriptionForeground); flex-shrink: 0; }
+.row-head .caret { width: 10px; color: var(--vscode-descriptionForeground); flex-shrink: 0; font-size: 10px; }
 .row-head .ts { color: var(--vscode-descriptionForeground); font-size: 11px; flex-shrink: 0; }
 .row-head .src-chip {
 	background: var(--vscode-badge-background);
@@ -181,6 +181,11 @@ body {
 	font-size: var(--vscode-editor-font-size, 13px);
 	color: var(--vscode-foreground);
 }
+
+.details { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 12px; }
+.detail-row { display: contents; }
+.detail-key { color: var(--vscode-descriptionForeground); text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; align-self: center; }
+.detail-val { white-space: pre-wrap; word-break: break-word; }
 
 /* JSON */
 .json { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
