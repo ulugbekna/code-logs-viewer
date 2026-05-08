@@ -53,6 +53,9 @@ const state: {
     currentMatchIdx: number;       // pointer within matchPositions
     rowHeights: Map<number, number>; // entry.id -> measured height (when expanded)
     defaultRowHeight: number;
+    defaultRowHeightCalibrated: boolean;
+    lastWindow: { first: number; last: number; topPad: number; bottomPad: number; sig: string } | undefined;
+    diag: string[];
 } = {
     entries: [],
     filtered: [],
@@ -65,6 +68,9 @@ const state: {
     currentMatchIdx: -1,
     rowHeights: new Map(),
     defaultRowHeight: 22,
+    defaultRowHeightCalibrated: false,
+    lastWindow: undefined,
+    diag: [],
 };
 
 state.expanded = new Set(state.persisted.expanded);
@@ -109,10 +115,11 @@ root.innerHTML = `
 			<button class="icon-btn" id="match-prev" title="Previous match (Shift+Enter)">↑</button>
 			<button class="icon-btn" id="match-next" title="Next match (Enter)">↓</button>
 		</div>
-		<div class="spacer"></div>
-		<span id="counts" class="muted"></span>
 		<button id="copy-filtered" title="Copy filtered entries">Copy filtered</button>
 		<button id="clear-filters" title="Clear all filters">Clear</button>
+		<div class="spacer"></div>
+		<span id="counts" class="muted"></span>
+		<button class="icon-btn" id="copy-diag" title="Copy diagnostic logs">Diag</button>
 	</header>
 	<canvas id="minimap" height="36"></canvas>
 	<div class="body">
@@ -151,6 +158,7 @@ const els = {
     matchPrev: $<HTMLButtonElement>('match-prev'),
     matchNext: $<HTMLButtonElement>('match-next'),
     copyFiltered: $<HTMLButtonElement>('copy-filtered'),
+    copyDiag: $<HTMLButtonElement>('copy-diag'),
     clearFilters: $<HTMLButtonElement>('clear-filters'),
     counts: $('counts'),
     minimap: $<HTMLCanvasElement>('minimap'),
@@ -212,6 +220,7 @@ els.modeFilter.addEventListener('click', () => setSearchMode('filter'));
 els.matchPrev.addEventListener('click', () => gotoMatch(-1));
 els.matchNext.addEventListener('click', () => gotoMatch(+1));
 els.copyFiltered.addEventListener('click', copyFiltered);
+els.copyDiag.addEventListener('click', copyDiag);
 els.clearFilters.addEventListener('click', clearFilters);
 els.sourceSearch.addEventListener('input', renderSourceFacets);
 
@@ -375,6 +384,7 @@ function renderSourceFacets(): void {
 
 let pendingRender = false;
 els.list.addEventListener('scroll', () => {
+    diag('scroll', { st: els.list.scrollTop, sh: els.list.scrollHeight, ch: els.list.clientHeight });
     if (pendingRender) { return; }
     pendingRender = true;
     requestAnimationFrame(() => { pendingRender = false; renderListWindow(); });
@@ -382,12 +392,9 @@ els.list.addEventListener('scroll', () => {
 
 const listInner = document.createElement('div');
 listInner.className = 'list-inner';
-const topSpacer = document.createElement('div');
-const bottomSpacer = document.createElement('div');
 const visibleHost = document.createElement('div');
-listInner.appendChild(topSpacer);
+visibleHost.className = 'visible-host';
 listInner.appendChild(visibleHost);
-listInner.appendChild(bottomSpacer);
 els.list.appendChild(listInner);
 
 function rowHeight(e: LogEntry): number {
@@ -404,43 +411,77 @@ function renderListWindow(): void {
     const scrollTop = els.list.scrollTop;
     const overscan = 10;
 
-    // Compute cumulative offsets lazily; for simplicity iterate.
-    let y = 0;
-    let firstIdx = 0;
-    for (; firstIdx < state.filtered.length; firstIdx++) {
-        const h = rowHeight(state.filtered[firstIdx]);
-        if (y + h >= scrollTop) { break; }
-        y += h;
+    // Compute cumulative offsets for ALL rows. This is O(N) per render but
+    // N is small (<50k entries) and gives us a stable, explicit total height
+    // that doesn't depend on which rows are currently in the DOM.
+    const offsets = new Array<number>(state.filtered.length + 1);
+    let acc = 0;
+    for (let i = 0; i < state.filtered.length; i++) {
+        offsets[i] = acc;
+        acc += rowHeight(state.filtered[i]);
     }
-    const topPad = y;
+    offsets[state.filtered.length] = acc;
+    const totalHeight = acc;
+
+    // Binary search for first visible index.
+    let lo = 0, hi = state.filtered.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (offsets[mid + 1] <= scrollTop) { lo = mid + 1; } else { hi = mid; }
+    }
+    let firstIdx = lo;
     let lastIdx = firstIdx;
-    let visH = 0;
-    for (; lastIdx < state.filtered.length && visH < viewportH + state.defaultRowHeight * overscan; lastIdx++) {
-        visH += rowHeight(state.filtered[lastIdx]);
+    while (lastIdx < state.filtered.length && offsets[lastIdx] < scrollTop + viewportH + state.defaultRowHeight * overscan) {
+        lastIdx++;
     }
     firstIdx = Math.max(0, firstIdx - overscan);
 
-    let bottomPad = 0;
-    for (let i = lastIdx; i < state.filtered.length; i++) { bottomPad += rowHeight(state.filtered[i]); }
+    const sig = `${firstIdx}|${lastIdx}|${state.expanded.size}|${state.wrapped.size}|${state.wrapAll ? 1 : 0}|${state.currentMatchIdx}|${state.persisted.search}`;
+    const lw = state.lastWindow;
+    if (lw && lw.first === firstIdx && lw.last === lastIdx && lw.sig === sig && lw.topPad === totalHeight && lw.bottomPad === 0) {
+        return;
+    }
 
-    topSpacer.style.height = `${topPad}px`;
-    bottomSpacer.style.height = `${bottomPad}px`;
+    // Set explicit total height; visible rows are absolutely positioned within.
+    listInner.style.height = `${totalHeight}px`;
 
     visibleHost.innerHTML = '';
     const matchSet = new Set(state.matchPositions);
     for (let i = firstIdx; i < lastIdx; i++) {
         const e = state.filtered[i];
-        visibleHost.appendChild(renderRow(e, i, matchSet.has(i)));
+        const row = renderRow(e, i, matchSet.has(i));
+        row.style.position = 'absolute';
+        row.style.top = `${offsets[i]}px`;
+        row.style.left = '0';
+        row.style.right = '0';
+        visibleHost.appendChild(row);
     }
 
-    // Measure expanded rows.
+    let measuredAny = false;
     for (const child of Array.from(visibleHost.children)) {
         const idStr = (child as HTMLElement).dataset.id;
         if (!idStr) { continue; }
         const id = Number(idStr);
-        if (state.expanded.has(id) || state.wrapped.has(id) || state.wrapAll) {
+        const needsMeasure = state.expanded.has(id) || state.wrapped.has(id) || state.wrapAll;
+        if (needsMeasure && !state.rowHeights.has(id)) {
             state.rowHeights.set(id, (child as HTMLElement).getBoundingClientRect().height);
+            measuredAny = true;
         }
+        if (!state.defaultRowHeightCalibrated && !needsMeasure) {
+            const h = (child as HTMLElement).getBoundingClientRect().height;
+            if (h > 0) {
+                state.defaultRowHeight = h;
+                state.defaultRowHeightCalibrated = true;
+                measuredAny = true;
+            }
+        }
+    }
+
+    state.lastWindow = { first: firstIdx, last: lastIdx, topPad: totalHeight, bottomPad: 0, sig };
+    diag('render', { firstIdx, lastIdx, totalHeight, sh: els.list.scrollHeight, st: els.list.scrollTop, drh: state.defaultRowHeight, calibrated: state.defaultRowHeightCalibrated, measuredAny });
+    if (measuredAny) {
+        state.lastWindow = undefined;
+        renderListWindow();
     }
 }
 
@@ -519,6 +560,7 @@ function toggleExpand(id: number): void {
         state.rowHeights.delete(id);
     } else {
         state.expanded.add(id);
+        preMeasure(id);
     }
     saveState();
     renderListWindow();
@@ -528,10 +570,29 @@ function toggleExpand(id: number): void {
 function toggleWrap(id: number): void {
     const anchor = captureAnchor(id);
     if (state.wrapped.has(id)) { state.wrapped.delete(id); }
-    else { state.wrapped.add(id); }
-    state.rowHeights.delete(id);
+    else { state.wrapped.add(id); preMeasure(id); }
+    if (!state.wrapped.has(id) && !state.expanded.has(id) && !state.wrapAll) { state.rowHeights.delete(id); }
     renderListWindow();
     restoreAnchor(id, anchor);
+}
+
+// Render the row off-screen (but inside the list, with the same width) to
+// measure its real height before it scrolls into the visible window. This
+// avoids height surprises during scroll, which would otherwise cause the
+// virtual list spacers to oscillate and the page to flicker.
+function preMeasure(id: number): void {
+    const e = state.entries.find(x => x.id === id);
+    if (!e) { return; }
+    const idx = state.filtered.indexOf(e);
+    const probe = renderRow(e, idx, false);
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.left = '0';
+    probe.style.top = '0';
+    probe.style.width = `${els.list.clientWidth}px`;
+    els.list.appendChild(probe);
+    state.rowHeights.set(id, probe.getBoundingClientRect().height);
+    probe.remove();
 }
 
 function captureAnchor(id: number): number | undefined {
@@ -775,6 +836,30 @@ function copyFiltered(): void {
     });
 }
 
+function copyDiag(): void {
+    const lines = [
+        `# code-logs-viewer diagnostics`,
+        `entries=${state.entries.length} filtered=${state.filtered.length}`,
+        `expanded=${state.expanded.size} wrapped=${state.wrapped.size} wrapAll=${state.wrapAll}`,
+        `viewportH=${els.list.clientHeight} listW=${els.list.clientWidth} dpr=${window.devicePixelRatio}`,
+        `scrollTop=${els.list.scrollTop} scrollHeight=${els.list.scrollHeight}`,
+        `defaultRowHeight=${state.defaultRowHeight} calibrated=${state.defaultRowHeightCalibrated}`,
+        `levels=${JSON.stringify(state.persisted.levels)}`,
+        `sources=${JSON.stringify(state.persisted.sources)}`,
+        `search=${JSON.stringify(state.persisted.search)} mode=${state.persisted.searchMode}`,
+        ``,
+        `# events (last ${state.diag.length})`,
+        ...state.diag,
+    ];
+    void navigator.clipboard.writeText(lines.join('\n')).then(() => showToast('Copied diagnostics'));
+}
+
+function diag(kind: string, info: Record<string, unknown>): void {
+    const line = `${performance.now().toFixed(0)} ${kind} ${JSON.stringify(info)}`;
+    state.diag.push(line);
+    if (state.diag.length > 500) { state.diag.splice(0, state.diag.length - 500); }
+}
+
 function serializeEntry(e: LogEntry): string {
     const sourcePart = e.source ? ` [${e.source}]` : '';
     const head = e.tsRaw ? `${e.tsRaw} [${e.level}]${sourcePart} ${e.message}` : e.message;
@@ -810,4 +895,4 @@ function updateModeBtn(): void {
 }
 
 // ---------- Resize ----------
-window.addEventListener('resize', () => { renderMinimap(); renderListWindow(); });
+window.addEventListener('resize', () => { state.rowHeights.clear(); renderMinimap(); renderListWindow(); });

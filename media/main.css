@@ -151,8 +151,16 @@ body {
 	flex: 1; overflow: auto;
 	font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
 	font-size: var(--vscode-editor-font-size, 13px);
+	/* Disable browser scroll anchoring. The virtual list rebuilds its visible
+	 * rows on every render; without this, the browser tries to "keep" an
+	 * anchor element in place by tweaking scrollTop, which our scroll
+	 * handler reacts to, which triggers another render — causing a
+	 * feedback loop where scrollTop oscillates and the page flickers. */
+	overflow-anchor: none;
 }
-.list-inner { display: flex; flex-direction: column; }
+.list * { overflow-anchor: none; }
+.list-inner { position: relative; }
+.visible-host { position: relative; }
 
 .row {
 	border-bottom: 1px solid transparent;
