@@ -177,7 +177,7 @@ body {
 }
 .row-head.expandable { cursor: pointer; }
 .row-head.wrappable { cursor: pointer; }
-.row-head .caret { width: 10px; color: var(--vscode-descriptionForeground); flex-shrink: 0; font-size: 10px; }
+.row-head .caret { width: 14px; color: var(--vscode-descriptionForeground); flex-shrink: 0; font-size: 14px; line-height: 1; text-align: center; }
 .row-head .ts { color: var(--vscode-descriptionForeground); font-size: 11px; flex-shrink: 0; }
 .row-head .src-chip {
 	background: var(--vscode-badge-background);
