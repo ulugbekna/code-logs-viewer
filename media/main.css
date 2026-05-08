@@ -176,6 +176,7 @@ body {
 	min-height: 22px;
 }
 .row-head.expandable { cursor: pointer; }
+.row-head.wrappable { cursor: pointer; }
 .row-head .caret { width: 10px; color: var(--vscode-descriptionForeground); flex-shrink: 0; font-size: 10px; }
 .row-head .ts { color: var(--vscode-descriptionForeground); font-size: 11px; flex-shrink: 0; }
 .row-head .src-chip {
@@ -189,6 +190,20 @@ body {
 .row-head .msg {
 	flex: 1; min-width: 0;
 	overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Wrap modes: per-row (.row.wrapped) or global (.list.wrap-all .row) */
+.list.wrap-all .row-head,
+.row.wrapped .row-head {
+	white-space: normal;
+	align-items: flex-start;
+}
+.list.wrap-all .row-head .msg,
+.row.wrapped .row-head .msg {
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow: visible;
+	text-overflow: clip;
 }
 
 .row-body {

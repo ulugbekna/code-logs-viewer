@@ -47,6 +47,8 @@ const state: {
     fileName: string;
     persisted: PersistedState;
     expanded: Set<number>;
+    wrapped: Set<number>;
+    wrapAll: boolean;
     matchPositions: number[];      // indices into `filtered` that contain matches
     currentMatchIdx: number;       // pointer within matchPositions
     rowHeights: Map<number, number>; // entry.id -> measured height (when expanded)
@@ -57,6 +59,8 @@ const state: {
     fileName: '',
     persisted: loadState(),
     expanded: new Set(),
+    wrapped: new Set(),
+    wrapAll: false,
     matchPositions: [],
     currentMatchIdx: -1,
     rowHeights: new Map(),
@@ -96,6 +100,7 @@ root.innerHTML = `
 			<button class="icon-btn" id="opt-case" title="Match Case (Alt+C)">Aa</button>
 			<button class="icon-btn" id="opt-word" title="Match Whole Word (Alt+W)">ab</button>
 			<button class="icon-btn" id="opt-regex" title="Use Regular Expression (Alt+R)">.*</button>
+			<button class="icon-btn" id="opt-wrap" title="Wrap long lines">↵</button>
 			<span class="seg" role="group" aria-label="Search behavior">
 				<button class="seg-btn" id="mode-highlight" title="Show all rows; highlight matches">Highlight</button>
 				<button class="seg-btn" id="mode-filter" title="Show only rows that match">Filter</button>
@@ -139,6 +144,7 @@ const els = {
     optCase: $<HTMLButtonElement>('opt-case'),
     optWord: $<HTMLButtonElement>('opt-word'),
     optRegex: $<HTMLButtonElement>('opt-regex'),
+    optWrap: $<HTMLButtonElement>('opt-wrap'),
     modeHighlight: $<HTMLButtonElement>('mode-highlight'),
     modeFilter: $<HTMLButtonElement>('mode-filter'),
     matchCount: $('match-count'),
@@ -187,6 +193,13 @@ els.search.addEventListener('keydown', e => {
 els.optCase.addEventListener('click', () => { state.persisted.caseSensitive = !state.persisted.caseSensitive; toggleBtn(els.optCase, state.persisted.caseSensitive); saveState(); recomputeAndRender(); });
 els.optWord.addEventListener('click', () => { state.persisted.wholeWord = !state.persisted.wholeWord; toggleBtn(els.optWord, state.persisted.wholeWord); saveState(); recomputeAndRender(); });
 els.optRegex.addEventListener('click', () => { state.persisted.regex = !state.persisted.regex; toggleBtn(els.optRegex, state.persisted.regex); saveState(); recomputeAndRender(); });
+els.optWrap.addEventListener('click', () => {
+    state.wrapAll = !state.wrapAll;
+    toggleBtn(els.optWrap, state.wrapAll);
+    els.list.classList.toggle('wrap-all', state.wrapAll);
+    state.rowHeights.clear();
+    renderListWindow();
+});
 function setSearchMode(mode: 'highlight' | 'filter'): void {
     if (state.persisted.searchMode === mode) { return; }
     state.persisted.searchMode = mode;
@@ -378,7 +391,7 @@ listInner.appendChild(bottomSpacer);
 els.list.appendChild(listInner);
 
 function rowHeight(e: LogEntry): number {
-    if (state.expanded.has(e.id)) {
+    if (state.expanded.has(e.id) || state.wrapped.has(e.id) || state.wrapAll) {
         return state.rowHeights.get(e.id) ?? state.defaultRowHeight;
     }
     return state.defaultRowHeight;
@@ -425,7 +438,7 @@ function renderListWindow(): void {
         const idStr = (child as HTMLElement).dataset.id;
         if (!idStr) { continue; }
         const id = Number(idStr);
-        if (state.expanded.has(id)) {
+        if (state.expanded.has(id) || state.wrapped.has(id) || state.wrapAll) {
             state.rowHeights.set(id, (child as HTMLElement).getBoundingClientRect().height);
         }
     }
@@ -439,13 +452,14 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
     if (state.matchPositions[state.currentMatchIdx] === filteredIdx) { row.classList.add('current-match'); }
     if (e.groupStart !== undefined) { row.classList.add('group-start'); }
     if (e.groupEnd) { row.classList.add('group-end'); }
+    if (state.wrapped.has(e.id)) { row.classList.add('wrapped'); }
 
     const expanded = state.expanded.has(e.id);
     const hasBody = e.body.length > 0;
 
     const head = document.createElement('div');
     head.className = 'row-head';
-    if (hasBody) { head.classList.add('expandable'); }
+    if (hasBody) { head.classList.add('expandable'); } else { head.classList.add('wrappable'); }
     head.innerHTML = `
 		<span class="caret">${hasBody ? (expanded ? '▾' : '▸') : ''}</span>
 		<span class="ts">${e.tsRaw.slice(11)}</span>
@@ -454,17 +468,18 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
 		<span class="msg">${highlight(e.message)}</span>`;
     row.appendChild(head);
 
-    if (hasBody) {
-        // Listener on the row (not just head) so clicks anywhere in the
-        // header strip toggle reliably. Clicks inside the body or on the
-        // source chip are ignored.
-        row.addEventListener('click', ev => {
-            const t = ev.target as HTMLElement;
-            if (t.closest('.row-body')) { return; }
-            if (t.classList.contains('src-chip')) { return; }
+    // Listener on the row so clicks anywhere in the header strip toggle
+    // reliably. Clicks inside the body or on the source chip are ignored.
+    row.addEventListener('click', ev => {
+        const t = ev.target as HTMLElement;
+        if (t.closest('.row-body')) { return; }
+        if (t.closest('.src-chip')) { return; }
+        if (hasBody) {
             toggleExpand(e.id);
-        });
-    }
+        } else {
+            toggleWrap(e.id);
+        }
+    });
     const chip = head.querySelector('.src-chip') as HTMLElement | null;
     if (chip) {
         chip.addEventListener('click', ev => {
@@ -505,6 +520,13 @@ function toggleExpand(id: number): void {
         state.expanded.add(id);
     }
     saveState();
+    renderListWindow();
+}
+
+function toggleWrap(id: number): void {
+    if (state.wrapped.has(id)) { state.wrapped.delete(id); }
+    else { state.wrapped.add(id); }
+    state.rowHeights.delete(id);
     renderListWindow();
 }
 
