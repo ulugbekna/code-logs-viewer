@@ -513,6 +513,7 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
 }
 
 function toggleExpand(id: number): void {
+    const anchor = captureAnchor(id);
     if (state.expanded.has(id)) {
         state.expanded.delete(id);
         state.rowHeights.delete(id);
@@ -521,13 +522,31 @@ function toggleExpand(id: number): void {
     }
     saveState();
     renderListWindow();
+    restoreAnchor(id, anchor);
 }
 
 function toggleWrap(id: number): void {
+    const anchor = captureAnchor(id);
     if (state.wrapped.has(id)) { state.wrapped.delete(id); }
     else { state.wrapped.add(id); }
     state.rowHeights.delete(id);
     renderListWindow();
+    restoreAnchor(id, anchor);
+}
+
+function captureAnchor(id: number): number | undefined {
+    const el = els.list.querySelector(`.row[data-id="${id}"]`) as HTMLElement | null;
+    if (!el) { return undefined; }
+    return el.getBoundingClientRect().top - els.list.getBoundingClientRect().top;
+}
+
+function restoreAnchor(id: number, prevTop: number | undefined): void {
+    if (prevTop === undefined) { return; }
+    const el = els.list.querySelector(`.row[data-id="${id}"]`) as HTMLElement | null;
+    if (!el) { return; }
+    const newTop = el.getBoundingClientRect().top - els.list.getBoundingClientRect().top;
+    const delta = newTop - prevTop;
+    if (delta !== 0) { els.list.scrollTop += delta; }
 }
 
 function renderTextBody(body: string[]): HTMLElement {
