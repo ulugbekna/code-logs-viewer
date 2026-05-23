@@ -1,5 +1,7 @@
 # Change Log
 
+## Unreleased
+
 ## 0.0.4
 
 - Search: Highlight / Filter segmented mode (default Highlight; matches stay in place).
