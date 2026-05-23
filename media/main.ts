@@ -49,6 +49,8 @@ const state: {
     expanded: Set<number>;
     wrapped: Set<number>;
     wrapAll: boolean;
+    prettyJson: Set<number>;       // entry.id -> show pretty-printed JSON extracted from message/body
+    jsonCache: Map<number, unknown | null>; // memoize extraction (null = no JSON detected)
     matchPositions: number[];      // indices into `filtered` that contain matches
     currentMatchIdx: number;       // pointer within matchPositions
     rowHeights: Map<number, number>; // entry.id -> measured height (when expanded)
@@ -64,6 +66,8 @@ const state: {
     expanded: new Set(),
     wrapped: new Set(),
     wrapAll: false,
+    prettyJson: new Set(),
+    jsonCache: new Map(),
     matchPositions: [],
     currentMatchIdx: -1,
     rowHeights: new Map(),
@@ -142,6 +146,7 @@ root.innerHTML = `
 		<span id="status-text"></span>
 	</footer>
 	<div id="toast" class="toast"></div>
+	<div id="ctx-menu" class="ctx-menu" role="menu" aria-hidden="true"></div>
 </div>`;
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -168,6 +173,7 @@ const els = {
     list: $('list'),
     statusText: $('status-text'),
     toast: $('toast'),
+    ctxMenu: $('ctx-menu'),
 };
 
 els.search.value = state.persisted.search;
@@ -235,6 +241,7 @@ function onHostMessage(msg: HostToWebview): void {
     if (msg.type === 'init' || msg.type === 'update') {
         state.entries = msg.entries;
         state.fileName = msg.fileName;
+        state.jsonCache.clear();
         // On init, prune persisted facet selections for unknown values? Keep them — harmless.
         recomputeAndRender();
     }
@@ -398,7 +405,7 @@ listInner.appendChild(visibleHost);
 els.list.appendChild(listInner);
 
 function rowHeight(e: LogEntry): number {
-    if (state.expanded.has(e.id) || state.wrapped.has(e.id) || state.wrapAll) {
+    if (state.expanded.has(e.id) || state.prettyJson.has(e.id) || state.wrapped.has(e.id) || state.wrapAll) {
         return state.rowHeights.get(e.id) ?? state.defaultRowHeight;
     }
     return state.defaultRowHeight;
@@ -436,7 +443,7 @@ function renderListWindow(): void {
     }
     firstIdx = Math.max(0, firstIdx - overscan);
 
-    const sig = `${firstIdx}|${lastIdx}|${state.expanded.size}|${state.wrapped.size}|${state.wrapAll ? 1 : 0}|${state.currentMatchIdx}|${state.persisted.search}`;
+    const sig = `${firstIdx}|${lastIdx}|${state.expanded.size}|${state.wrapped.size}|${state.prettyJson.size}|${state.wrapAll ? 1 : 0}|${state.currentMatchIdx}|${state.persisted.search}`;
     const lw = state.lastWindow;
     if (lw && lw.first === firstIdx && lw.last === lastIdx && lw.sig === sig && lw.topPad === totalHeight && lw.bottomPad === 0) {
         return;
@@ -462,7 +469,7 @@ function renderListWindow(): void {
         const idStr = (child as HTMLElement).dataset.id;
         if (!idStr) { continue; }
         const id = Number(idStr);
-        const needsMeasure = state.expanded.has(id) || state.wrapped.has(id) || state.wrapAll;
+        const needsMeasure = state.expanded.has(id) || state.prettyJson.has(id) || state.wrapped.has(id) || state.wrapAll;
         if (needsMeasure && !state.rowHeights.has(id)) {
             state.rowHeights.set(id, (child as HTMLElement).getBoundingClientRect().height);
             measuredAny = true;
@@ -496,13 +503,16 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
     if (state.wrapped.has(e.id)) { row.classList.add('wrapped'); }
 
     const expanded = state.expanded.has(e.id);
+    const pretty = state.prettyJson.has(e.id);
     const hasBody = e.body.length > 0;
+    const showBody = (expanded && hasBody) || pretty;
+    const caretActive = hasBody || pretty;
 
     const head = document.createElement('div');
     head.className = 'row-head';
-    if (hasBody) { head.classList.add('expandable'); } else { head.classList.add('wrappable'); }
+    if (caretActive) { head.classList.add('expandable'); } else { head.classList.add('wrappable'); }
     head.innerHTML = `
-		<span class="caret">${hasBody ? (expanded ? '▾' : '▸') : ''}</span>
+		<span class="caret">${caretActive ? (showBody ? '▾' : '▸') : ''}</span>
 		<span class="ts">${e.tsRaw.slice(11)}</span>
 		<span class="badge level-${e.level}">${e.level}</span>
 		${e.source ? `<span class="src-chip" data-src="${escapeHtml(e.source)}">${escapeHtml(e.source)}</span>` : ''}
@@ -515,11 +525,22 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
         const t = ev.target as HTMLElement;
         if (t.closest('.row-body')) { return; }
         if (t.closest('.src-chip')) { return; }
-        if (hasBody) {
+        if (pretty) {
+            // Collapsing a pretty-json row also turns off pretty mode.
+            togglePrettyJson(e.id, false);
+        } else if (hasBody) {
             toggleExpand(e.id);
+        } else if (extractJson(e) !== undefined) {
+            // No body, but the message contains a JSON blob — show it
+            // pretty-printed instead of wrapping the long line.
+            togglePrettyJson(e.id, true);
         } else {
             toggleWrap(e.id);
         }
+    });
+    row.addEventListener('contextmenu', ev => {
+        if ((ev.target as HTMLElement).closest('.src-chip')) { return; }
+        openRowContextMenu(ev, e);
     });
     const chip = head.querySelector('.src-chip') as HTMLElement | null;
     if (chip) {
@@ -533,10 +554,17 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
         });
     }
 
-    if (expanded && hasBody) {
+    if (showBody) {
         const bodyEl = document.createElement('div');
         bodyEl.className = 'row-body';
-        if (e.bodyKind === 'json') {
+        if (pretty) {
+            const parsed = extractJson(e);
+            if (parsed !== undefined) {
+                bodyEl.appendChild(renderJson(parsed));
+            } else {
+                bodyEl.appendChild(renderTextBody(e.body.length > 0 ? e.body : [e.message]));
+            }
+        } else if (e.bodyKind === 'json') {
             const joined = e.body.join('\n').trim();
             try {
                 const parsed = JSON.parse(joined);
@@ -575,6 +603,139 @@ function toggleWrap(id: number): void {
     renderListWindow();
     restoreAnchor(id, anchor);
 }
+
+function togglePrettyJson(id: number, on: boolean): void {
+    const anchor = captureAnchor(id);
+    if (on) {
+        state.prettyJson.add(id);
+        state.rowHeights.delete(id);
+        preMeasure(id);
+    } else {
+        state.prettyJson.delete(id);
+        if (!state.expanded.has(id) && !state.wrapped.has(id) && !state.wrapAll) {
+            state.rowHeights.delete(id);
+        }
+    }
+    renderListWindow();
+    restoreAnchor(id, anchor);
+}
+
+// Find a JSON value embedded anywhere in the entry's message or body.
+// Returns the parsed value (object/array/primitive) or undefined if none.
+function extractJson(e: LogEntry): unknown | undefined {
+    const cached = state.jsonCache.get(e.id);
+    if (cached !== undefined) { return cached === null ? undefined : cached; }
+    const parsed = computeExtractedJson(e);
+    state.jsonCache.set(e.id, parsed === undefined ? null : parsed);
+    return parsed;
+}
+
+function computeExtractedJson(e: LogEntry): unknown | undefined {
+    // 1. Body that is already JSON-shaped.
+    if (e.body.length > 0) {
+        const joined = e.body.join('\n').trim();
+        if (joined.startsWith('{') || joined.startsWith('[')) {
+            try { return JSON.parse(joined); } catch { /* fall through */ }
+        }
+    }
+    // 2. JSON embedded in the message (header line). Find first '{' or '['
+    // and try parsing the largest balanced substring starting there.
+    const msg = e.message;
+    for (let i = 0; i < msg.length; i++) {
+        const c = msg[i];
+        if (c !== '{' && c !== '[') { continue; }
+        const balanced = sliceBalancedJson(msg, i);
+        if (!balanced) { continue; }
+        try { return JSON.parse(balanced); } catch { /* keep searching */ }
+    }
+    return undefined;
+}
+
+function sliceBalancedJson(s: string, start: number): string | undefined {
+    const open = s[start];
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = start; i < s.length; i++) {
+        const c = s[i];
+        if (esc) { esc = false; continue; }
+        if (inStr) {
+            if (c === '\\') { esc = true; }
+            else if (c === '"') { inStr = false; }
+            continue;
+        }
+        if (c === '"') { inStr = true; continue; }
+        if (c === open) { depth++; }
+        else if (c === close) {
+            depth--;
+            if (depth === 0) { return s.slice(start, i + 1); }
+        }
+    }
+    return undefined;
+}
+
+// ---------- Context menu ----------
+function openRowContextMenu(ev: MouseEvent, e: LogEntry): void {
+    ev.preventDefault();
+    const menu = els.ctxMenu;
+    menu.innerHTML = '';
+    const items: { label: string; action: () => void; disabled?: boolean }[] = [];
+
+    const hasJson = extractJson(e) !== undefined;
+    const isPretty = state.prettyJson.has(e.id);
+    items.push({
+        label: isPretty ? 'Show raw' : 'Pretty-print JSON',
+        action: () => togglePrettyJson(e.id, !isPretty),
+        disabled: !hasJson && !isPretty,
+    });
+
+    for (const item of items) {
+        const el = document.createElement('div');
+        el.className = 'ctx-item';
+        if (item.disabled) { el.classList.add('disabled'); }
+        el.textContent = item.label;
+        el.setAttribute('role', 'menuitem');
+        if (!item.disabled) {
+            el.addEventListener('click', () => { item.action(); closeContextMenu(); });
+        }
+        menu.appendChild(el);
+    }
+
+    // Position the menu, keeping it within the viewport.
+    menu.style.visibility = 'hidden';
+    menu.classList.add('show');
+    menu.setAttribute('aria-hidden', 'false');
+    const rect = menu.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const x = Math.min(ev.clientX, vw - rect.width - 4);
+    const y = Math.min(ev.clientY, vh - rect.height - 4);
+    menu.style.left = `${Math.max(0, x)}px`;
+    menu.style.top = `${Math.max(0, y)}px`;
+    menu.style.visibility = '';
+}
+
+function closeContextMenu(): void {
+    const menu = els.ctxMenu;
+    menu.classList.remove('show');
+    menu.setAttribute('aria-hidden', 'true');
+    menu.innerHTML = '';
+}
+
+document.addEventListener('click', ev => {
+    if (!els.ctxMenu.classList.contains('show')) { return; }
+    if ((ev.target as HTMLElement).closest('#ctx-menu')) { return; }
+    closeContextMenu();
+});
+document.addEventListener('contextmenu', ev => {
+    if ((ev.target as HTMLElement).closest('.row')) { return; }
+    closeContextMenu();
+});
+document.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') { closeContextMenu(); }
+});
+els.list.addEventListener('scroll', closeContextMenu);
 
 // Render the row off-screen (but inside the list, with the same width) to
 // measure its real height before it scrolls into the visible window. This
