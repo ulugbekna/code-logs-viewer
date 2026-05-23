@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Secondary "Within results…" search next to the main search box: AND-narrows visible rows on top of the primary search, respects the Highlight/Filter mode, and highlights both terms.
 - Pretty-print JSON embedded in log entries: click a body-less entry whose message contains a JSON blob to render it as an interactive collapsible tree (instead of wrapping the long line). Right-click any entry for a "Pretty-print JSON" / "Show raw" toggle.
 - Support untitled/unsaved editors: invoke **Logs: Open with Log Viewer** from the command palette on an in-memory document and the viewer re-renders on every edit.
 

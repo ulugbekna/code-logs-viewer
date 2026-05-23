@@ -30,6 +30,7 @@ interface PersistedState {
     levels: Record<string, boolean>;
     sources: Record<string, boolean>;
     search: string;
+    search2: string;
     searchMode: 'highlight' | 'filter';
     regex: boolean;
     caseSensitive: boolean;
@@ -85,6 +86,7 @@ function loadState(): PersistedState {
         levels: s?.levels ?? {},
         sources: s?.sources ?? {},
         search: s?.search ?? '',
+        search2: s?.search2 ?? '',
         searchMode: s?.searchMode ?? 'highlight',
         regex: s?.regex ?? false,
         caseSensitive: s?.caseSensitive ?? false,
@@ -107,6 +109,7 @@ root.innerHTML = `
 	<header class="toolbar">
 		<div class="search-group">
 			<input id="search" type="text" placeholder="Search…" spellcheck="false" />
+			<input id="search2" type="text" placeholder="Within results…" spellcheck="false" title="Further narrow results (AND)" />
 			<button class="icon-btn" id="opt-case" title="Match Case (Alt+C)">Aa</button>
 			<button class="icon-btn" id="opt-word" title="Match Whole Word (Alt+W)">ab</button>
 			<button class="icon-btn" id="opt-regex" title="Use Regular Expression (Alt+R)">.*</button>
@@ -153,6 +156,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 
 const els = {
     search: $<HTMLInputElement>('search'),
+    search2: $<HTMLInputElement>('search2'),
     optCase: $<HTMLButtonElement>('opt-case'),
     optWord: $<HTMLButtonElement>('opt-word'),
     optRegex: $<HTMLButtonElement>('opt-regex'),
@@ -177,6 +181,7 @@ const els = {
 };
 
 els.search.value = state.persisted.search;
+els.search2.value = state.persisted.search2;
 toggleBtn(els.optCase, state.persisted.caseSensitive);
 toggleBtn(els.optWord, state.persisted.wholeWord);
 toggleBtn(els.optRegex, state.persisted.regex);
@@ -199,6 +204,25 @@ els.search.addEventListener('keydown', e => {
     } else if (e.key === 'Escape') {
         els.search.value = '';
         state.persisted.search = '';
+        saveState();
+        recomputeAndRender();
+    }
+});
+
+let search2Debounce: number | undefined;
+els.search2.addEventListener('input', () => {
+    state.persisted.search2 = els.search2.value;
+    saveState();
+    window.clearTimeout(search2Debounce);
+    search2Debounce = window.setTimeout(() => recomputeAndRender(), 100);
+});
+els.search2.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        gotoMatch(e.shiftKey ? -1 : +1);
+    } else if (e.key === 'Escape') {
+        els.search2.value = '';
+        state.persisted.search2 = '';
         saveState();
         recomputeAndRender();
     }
@@ -248,8 +272,8 @@ function onHostMessage(msg: HostToWebview): void {
 }
 
 // ---------- Filtering ----------
-function buildSearchMatcher(): ((s: string) => boolean) | undefined {
-    const q = state.persisted.search;
+function buildSearchMatcher(query: string): ((s: string) => boolean) | undefined {
+    const q = query;
     if (!q) { return undefined; }
     let re: RegExp;
     try {
@@ -280,7 +304,8 @@ function recompute(): void {
     const anySource = !Object.values(sources).some(v => v);
     const tMin = state.persisted.timeMin;
     const tMax = state.persisted.timeMax;
-    const matcher = buildSearchMatcher();
+    const matcher = buildSearchMatcher(state.persisted.search);
+    const matcher2 = buildSearchMatcher(state.persisted.search2);
     const filterBySearch = state.persisted.searchMode === 'filter';
 
     const out: LogEntry[] = [];
@@ -290,9 +315,17 @@ function recompute(): void {
         if (!anySource && !(e.source && sources[e.source])) { continue; }
         if (tMin !== undefined && e.ts && e.ts < tMin) { continue; }
         if (tMax !== undefined && e.ts && e.ts > tMax) { continue; }
-        const isMatch = matcher ? matcher(entryText(e)) : false;
-        if (matcher && filterBySearch && !isMatch) { continue; }
-        if (isMatch) { matchPositions.push(out.length); }
+        const text = entryText(e);
+        const isMatch = matcher ? matcher(text) : false;
+        const isMatch2 = matcher2 ? matcher2(text) : false;
+        if (filterBySearch) {
+            if (matcher && !isMatch) { continue; }
+            if (matcher2 && !isMatch2) { continue; }
+        }
+        // Match navigation tracks primary-search matches; if only the secondary
+        // is set, fall back to secondary so the arrows / counter stay useful.
+        const navMatch = matcher ? isMatch : (matcher2 ? isMatch2 : false);
+        if (navMatch) { matchPositions.push(out.length); }
         out.push(e);
     }
     state.filtered = out;
@@ -320,7 +353,7 @@ function renderToolbar(): void {
     const total = state.entries.length;
     const shown = state.filtered.length;
     els.counts.textContent = `${shown.toLocaleString()} / ${total.toLocaleString()}`;
-    if (state.persisted.search) {
+    if (state.persisted.search || state.persisted.search2) {
         const n = state.matchPositions.length;
         els.matchCount.textContent = n === 0 ? 'No matches' : `${state.currentMatchIdx + 1} of ${n}`;
     } else {
@@ -443,7 +476,7 @@ function renderListWindow(): void {
     }
     firstIdx = Math.max(0, firstIdx - overscan);
 
-    const sig = `${firstIdx}|${lastIdx}|${state.expanded.size}|${state.wrapped.size}|${state.prettyJson.size}|${state.wrapAll ? 1 : 0}|${state.currentMatchIdx}|${state.persisted.search}`;
+    const sig = `${firstIdx}|${lastIdx}|${state.expanded.size}|${state.wrapped.size}|${state.prettyJson.size}|${state.wrapAll ? 1 : 0}|${state.currentMatchIdx}|${state.persisted.search}|${state.persisted.search2}`;
     const lw = state.lastWindow;
     if (lw && lw.first === firstIdx && lw.last === lastIdx && lw.sig === sig && lw.topPad === totalHeight && lw.bottomPad === 0) {
         return;
@@ -840,20 +873,30 @@ function renderJsonNode(value: unknown, key: string | undefined, depth: number):
 }
 
 // ---------- Highlighting ----------
-function highlight(text: string): string {
-    const matcher = state.persisted.search;
-    const safe = escapeHtml(text);
-    if (!matcher) { return safe; }
-    let re: RegExp;
-    try {
-        const flags = state.persisted.caseSensitive ? 'g' : 'gi';
-        if (state.persisted.regex) { re = new RegExp(matcher, flags); }
-        else {
-            let pattern = escapeRe(matcher);
+function buildHighlightRegex(): RegExp | undefined {
+    const parts: string[] = [];
+    const flags = state.persisted.caseSensitive ? 'g' : 'gi';
+    for (const q of [state.persisted.search, state.persisted.search2]) {
+        if (!q) { continue; }
+        let pattern: string;
+        if (state.persisted.regex) {
+            pattern = q;
+        } else {
+            pattern = escapeRe(q);
             if (state.persisted.wholeWord) { pattern = `\\b${pattern}\\b`; }
-            re = new RegExp(pattern, flags);
         }
-    } catch { return safe; }
+        // Wrap each term in a non-capturing group before alternating so
+        // top-level alternations inside a user regex don't change meaning.
+        parts.push(`(?:${pattern})`);
+    }
+    if (parts.length === 0) { return undefined; }
+    try { return new RegExp(parts.join('|'), flags); } catch { return undefined; }
+}
+
+function highlight(text: string): string {
+    const safe = escapeHtml(text);
+    const re = buildHighlightRegex();
+    if (!re) { return safe; }
     return safe.replace(re, m => `<mark>${m}</mark>`);
 }
 
@@ -1007,7 +1050,7 @@ function copyDiag(): void {
         `defaultRowHeight=${state.defaultRowHeight} calibrated=${state.defaultRowHeightCalibrated}`,
         `levels=${JSON.stringify(state.persisted.levels)}`,
         `sources=${JSON.stringify(state.persisted.sources)}`,
-        `search=${JSON.stringify(state.persisted.search)} mode=${state.persisted.searchMode}`,
+        `search=${JSON.stringify(state.persisted.search)} search2=${JSON.stringify(state.persisted.search2)} mode=${state.persisted.searchMode}`,
         ``,
         `# events (last ${state.diag.length})`,
         ...state.diag,
@@ -1031,9 +1074,11 @@ function clearFilters(): void {
     state.persisted.levels = {};
     state.persisted.sources = {};
     state.persisted.search = '';
+    state.persisted.search2 = '';
     state.persisted.timeMin = undefined;
     state.persisted.timeMax = undefined;
     els.search.value = '';
+    els.search2.value = '';
     saveState();
     recomputeAndRender();
 }

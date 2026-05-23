@@ -27,9 +27,8 @@ body {
 	background: var(--vscode-sideBar-background);
 }
 .toolbar .spacer { flex: 1; }
-.search-group { display: flex; align-items: center; gap: 4px; flex: 0 1 540px; }
-#search {
-	flex: 1; min-width: 200px;
+.search-group { display: flex; align-items: center; gap: 4px; flex: 1 1 700px; min-width: 0; }
+#search, #search2 {
 	padding: 4px 8px;
 	background: var(--vscode-input-background);
 	color: var(--vscode-input-foreground);
@@ -37,7 +36,9 @@ body {
 	border-radius: 2px;
 	font-family: inherit;
 }
-#search:focus { outline: 1px solid var(--vscode-focusBorder); }
+#search { flex: 2 1 0; min-width: 140px; }
+#search2 { flex: 1 1 0; min-width: 100px; }
+#search:focus, #search2:focus { outline: 1px solid var(--vscode-focusBorder); }
 
 .icon-btn, .toolbar button {
 	background: transparent;
