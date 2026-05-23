@@ -17,6 +17,8 @@ A VS Code extension that opens VS Code Output-pane style log files (`*.out.md`, 
 1. Open or right-click a `*.out.md` or `*.log` file.
 2. Run **Logs: Open with Log Viewer** from the command palette, the editor title menu, or the Explorer context menu.
 
+You can also paste log text into an untitled/unsaved editor and run **Logs: Open with Log Viewer** from the command palette — the viewer reads the in-memory contents and re-renders on every edit.
+
 ## Keyboard shortcuts (in the viewer)
 
 - `Cmd/Ctrl+F` — focus search

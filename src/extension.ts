@@ -32,6 +32,20 @@ class LogViewerManager {
 	}
 }
 
+function findOpenDocument(uri: vscode.Uri): vscode.TextDocument | undefined {
+	const target = uri.toString();
+	return vscode.workspace.textDocuments.find(d => d.uri.toString() === target);
+}
+
+function displayName(uri: vscode.Uri): string {
+	if (uri.scheme !== 'file') {
+		// For untitled / in-memory documents, prefer the user-facing title (e.g., "Untitled-1").
+		const doc = findOpenDocument(uri);
+		if (doc) { return doc.isUntitled ? doc.fileName : path.basename(doc.fileName); }
+	}
+	return path.basename(uri.fsPath);
+}
+
 type HostToWebview =
 	| { type: 'init'; entries: LogEntry[]; fileName: string }
 	| { type: 'update'; entries: LogEntry[]; fileName: string };
@@ -44,7 +58,7 @@ class LogViewerPanel {
 	static async create(context: vscode.ExtensionContext, uri: vscode.Uri): Promise<LogViewerPanel> {
 		const panel = vscode.window.createWebviewPanel(
 			'codeLogsViewer',
-			path.basename(uri.fsPath),
+			displayName(uri),
 			vscode.ViewColumn.Active,
 			{
 				enableScripts: true,
@@ -73,11 +87,26 @@ class LogViewerPanel {
 		panel.onDidDispose(() => this.dispose(), null, this.disposables);
 		panel.webview.onDidReceiveMessage((msg: WebviewToHost) => this.onMessage(msg), null, this.disposables);
 
-		const watcher = vscode.workspace.createFileSystemWatcher(
-			new vscode.RelativePattern(vscode.Uri.file(path.dirname(uri.fsPath)), path.basename(uri.fsPath)),
-		);
-		this.disposables.push(watcher);
-		watcher.onDidChange(() => void this.refresh(true), null, this.disposables);
+		if (uri.scheme === 'file') {
+			const watcher = vscode.workspace.createFileSystemWatcher(
+				new vscode.RelativePattern(vscode.Uri.file(path.dirname(uri.fsPath)), path.basename(uri.fsPath)),
+			);
+			this.disposables.push(watcher);
+			watcher.onDidChange(() => void this.refresh(true), null, this.disposables);
+		} else {
+			// Untitled / in-memory documents: react to in-editor edits and to the
+			// document being closed (e.g., user discards the untitled buffer).
+			vscode.workspace.onDidChangeTextDocument(e => {
+				if (e.document.uri.toString() === this.uri.toString()) {
+					void this.refresh(true);
+				}
+			}, null, this.disposables);
+			vscode.workspace.onDidCloseTextDocument(doc => {
+				if (doc.uri.toString() === this.uri.toString()) {
+					this.panel.dispose();
+				}
+			}, null, this.disposables);
+		}
 	}
 
 	reveal(): void { this.panel.reveal(); }
@@ -90,15 +119,26 @@ class LogViewerPanel {
 	}
 
 	private async refresh(isUpdate = false): Promise<void> {
-		const bytes = await vscode.workspace.fs.readFile(this.uri);
-		const text = new TextDecoder('utf-8').decode(bytes);
+		const text = await this.readText();
 		const entries = parseLog(text);
 		const message: HostToWebview = {
 			type: isUpdate ? 'update' : 'init',
 			entries,
-			fileName: path.basename(this.uri.fsPath),
+			fileName: displayName(this.uri),
 		};
 		void this.panel.webview.postMessage(message);
+	}
+
+	private async readText(): Promise<string> {
+		if (this.uri.scheme !== 'file') {
+			const doc = findOpenDocument(this.uri);
+			if (!doc) {
+				throw new Error(`Document is no longer open: ${this.uri.toString()}`);
+			}
+			return doc.getText();
+		}
+		const bytes = await vscode.workspace.fs.readFile(this.uri);
+		return new TextDecoder('utf-8').decode(bytes);
 	}
 
 	private onMessage(msg: WebviewToHost): void {
