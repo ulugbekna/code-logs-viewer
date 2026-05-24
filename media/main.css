@@ -311,6 +311,11 @@ mark {
 	cursor: default;
 }
 .ctx-item.disabled:hover { background: transparent; color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); }
+.ctx-sep {
+	height: 1px;
+	margin: 4px 6px;
+	background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
+}
 
 /* Facet level color hints */
 .facet.level-error .badge { color: var(--lvl-error); }

@@ -404,9 +404,23 @@ function renderSourceFacets(): void {
 // Strategy: maintain a top spacer + visible chunk + bottom spacer based on
 // scrollTop. Rows have estimated height; expanded rows get measured.
 
+// While the user is dragging (e.g. to select text), virtualization recycling
+// would destroy the in-progress selection. Defer scroll-driven re-renders
+// until the mouse button is released — the list still scrolls natively,
+// but the visible rows stay in the DOM so the selection survives.
+let isMouseDragging = false;
+let pendingDeferredRender = false;
+els.list.addEventListener('mousedown', () => { isMouseDragging = true; });
+document.addEventListener('mouseup', () => {
+    if (!isMouseDragging) { return; }
+    isMouseDragging = false;
+    if (pendingDeferredRender) { pendingDeferredRender = false; renderListWindow(); }
+});
+
 let pendingRender = false;
 els.list.addEventListener('scroll', () => {
     diag('scroll', { st: els.list.scrollTop, sh: els.list.scrollHeight, ch: els.list.clientHeight });
+    if (isMouseDragging) { pendingDeferredRender = true; return; }
     if (pendingRender) { return; }
     pendingRender = true;
     requestAnimationFrame(() => { pendingRender = false; renderListWindow(); });
@@ -536,7 +550,19 @@ function renderRow(e: LogEntry, filteredIdx: number, isMatch: boolean): HTMLElem
 
     // Listener on the row so clicks anywhere in the header strip toggle
     // reliably. Clicks inside the body or on the source chip are ignored.
+    // We also distinguish a real click from the tail end of a drag-to-select
+    // gesture (browsers fire `click` after such a drag if the pointer ends
+    // up in the same element) so that selecting text in the message or
+    // header doesn't accidentally toggle the row and rebuild its DOM —
+    // which would destroy the selection.
+    let pressX = 0, pressY = 0;
+    row.addEventListener('mousedown', ev => { pressX = ev.clientX; pressY = ev.clientY; });
     row.addEventListener('click', ev => {
+        if (ev.button !== 0) { return; }
+        const dx = ev.clientX - pressX, dy = ev.clientY - pressY;
+        if (dx * dx + dy * dy > 16) { return; } // drag, not a click
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && sel.toString().length > 0) { return; }
         const t = ev.target as HTMLElement;
         if (t.closest('.row-body')) { return; }
         if (t.closest('.src-chip')) { return; }
@@ -650,22 +676,56 @@ function extractJson(e: LogEntry): unknown | undefined {
     return parsed;
 }
 
+// ---------- Clipboard ----------
+function copyToClipboard(text: string, label: string): void {
+    void navigator.clipboard.writeText(text).then(
+        () => showToast(`Copied ${label}`),
+        () => showToast('Copy failed'),
+    );
+}
+
 // ---------- Context menu ----------
 function openRowContextMenu(ev: MouseEvent, e: LogEntry): void {
     ev.preventDefault();
     const menu = els.ctxMenu;
     menu.innerHTML = '';
-    const items: { label: string; action: () => void; disabled?: boolean }[] = [];
+    type Item = { label: string; action: () => void; disabled?: boolean } | { separator: true };
+    const items: Item[] = [];
 
-    const hasJson = extractJson(e) !== undefined;
+    const sel = window.getSelection();
+    const selText = sel && !sel.isCollapsed ? sel.toString() : '';
+    if (selText) {
+        items.push({ label: 'Copy selection', action: () => copyToClipboard(selText, 'selection') });
+        items.push({ separator: true });
+    }
+
+    items.push({ label: 'Copy entry', action: () => copyToClipboard(serializeEntry(e), 'entry') });
+    items.push({ label: 'Copy message', action: () => copyToClipboard(e.message, 'message') });
+
+    const json = extractJson(e);
+    items.push({
+        label: 'Copy as JSON',
+        action: () => copyToClipboard(JSON.stringify(json, null, 2), 'JSON'),
+        disabled: json === undefined,
+    });
+
+    items.push({ separator: true });
+
     const isPretty = state.prettyJson.has(e.id);
     items.push({
         label: isPretty ? 'Show raw' : 'Pretty-print JSON',
         action: () => togglePrettyJson(e.id, !isPretty),
-        disabled: !hasJson && !isPretty,
+        disabled: json === undefined && !isPretty,
     });
 
     for (const item of items) {
+        if ('separator' in item) {
+            const sep = document.createElement('div');
+            sep.className = 'ctx-sep';
+            sep.setAttribute('role', 'separator');
+            menu.appendChild(sep);
+            continue;
+        }
         const el = document.createElement('div');
         el.className = 'ctx-item';
         if (item.disabled) { el.classList.add('disabled'); }
