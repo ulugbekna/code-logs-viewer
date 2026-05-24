@@ -15,9 +15,6 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onCommand:code-logs-viewer.open"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
