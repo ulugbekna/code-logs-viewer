@@ -11,7 +11,10 @@ declare function acquireVsCodeApi(): { postMessage: (m: WebviewToHost) => void; 
 const vscode = acquireVsCodeApi();
 
 // ---------- State ----------
+const STATE_VERSION = 1;
+
 interface PersistedState {
+    version: number;
     levels: Record<string, boolean>;
     sources: Record<string, boolean>;
     search: string;
@@ -23,6 +26,7 @@ interface PersistedState {
     timeMin?: number;
     timeMax?: number;
     expanded: number[];
+    wrapAll: boolean;
 }
 
 const KNOWN_LEVELS_LIST: readonly string[] = KNOWN_LEVELS;
@@ -66,10 +70,15 @@ const state: {
 };
 
 state.expanded = new Set(state.persisted.expanded);
+state.wrapAll = state.persisted.wrapAll;
 
 function loadState(): PersistedState {
-    const s = vscode.getState() as Partial<PersistedState> | undefined;
+    const raw = vscode.getState() as Partial<PersistedState> | undefined;
+    // Unknown / older versions: start from defaults rather than risk reading
+    // fields with changed semantics.
+    const s = (raw && raw.version === STATE_VERSION) ? raw : undefined;
     return {
+        version: STATE_VERSION,
         levels: s?.levels ?? {},
         sources: s?.sources ?? {},
         search: s?.search ?? '',
@@ -81,11 +90,13 @@ function loadState(): PersistedState {
         timeMin: s?.timeMin,
         timeMax: s?.timeMax,
         expanded: s?.expanded ?? [],
+        wrapAll: s?.wrapAll ?? false,
     };
 }
 
 function saveState(): void {
     state.persisted.expanded = [...state.expanded];
+    state.persisted.wrapAll = state.wrapAll;
     vscode.setState(state.persisted);
 }
 
@@ -110,7 +121,7 @@ root.innerHTML = `
 			<button class="icon-btn" id="match-next" title="Next match (Enter)">↓</button>
 		</div>
 		<button id="copy-filtered" title="Copy filtered entries">Copy filtered</button>
-		<button id="clear-filters" title="Clear all filters">Clear</button>
+		<button id="clear-filters" title="Clear search, level/source/time filters">Clear</button>
 		<div class="spacer"></div>
 		<span id="counts" class="muted"></span>
 		<button class="icon-btn" id="copy-diag" title="Copy diagnostic logs">Diag</button>
@@ -172,6 +183,8 @@ els.search2.value = state.persisted.search2;
 toggleBtn(els.optCase, state.persisted.caseSensitive);
 toggleBtn(els.optWord, state.persisted.wholeWord);
 toggleBtn(els.optRegex, state.persisted.regex);
+toggleBtn(els.optWrap, state.wrapAll);
+els.list.classList.toggle('wrap-all', state.wrapAll);
 updateModeBtn();
 
 // ---------- Events ----------
@@ -223,6 +236,7 @@ els.optWrap.addEventListener('click', () => {
     toggleBtn(els.optWrap, state.wrapAll);
     els.list.classList.toggle('wrap-all', state.wrapAll);
     state.rowHeights.clear();
+    saveState();
     renderListWindow();
 });
 function setSearchMode(mode: 'highlight' | 'filter'): void {
@@ -254,7 +268,15 @@ function onHostMessage(msg: HostToWebview): void {
         state.fileName = msg.fileName;
         state.jsonCache.clear();
         state.entryTextCache.clear();
-        // On init, prune persisted facet selections for unknown values? Keep them — harmless.
+        if (msg.type === 'init') {
+            // A fresh file's timestamps are likely unrelated to whatever the
+            // previously persisted brush covered — keeping it would silently
+            // filter the new log to zero rows. Drop the brush on init only;
+            // 'update' (file change / edit) keeps it.
+            state.persisted.timeMin = undefined;
+            state.persisted.timeMax = undefined;
+            saveState();
+        }
         recomputeAndRender();
     }
 }
