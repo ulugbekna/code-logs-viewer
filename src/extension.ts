@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { LogEntry, parseLog } from './parser';
+import { parseLog } from './parser';
+import type { HostToWebview, WebviewToHost } from '../shared/types';
 
 export function activate(context: vscode.ExtensionContext) {
 	const manager = new LogViewerManager(context);
@@ -45,14 +46,6 @@ function displayName(uri: vscode.Uri): string {
 	}
 	return path.basename(uri.fsPath);
 }
-
-type HostToWebview =
-	| { type: 'init'; entries: LogEntry[]; fileName: string }
-	| { type: 'update'; entries: LogEntry[]; fileName: string };
-
-type WebviewToHost =
-	| { type: 'reload' }
-	| { type: 'info'; text: string };
 
 class LogViewerPanel {
 	static async create(context: vscode.ExtensionContext, uri: vscode.Uri): Promise<LogViewerPanel> {

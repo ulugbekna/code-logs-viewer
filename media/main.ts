@@ -1,26 +1,7 @@
 // Webview UI for the Code Logs Viewer.
 // Vanilla TS + DOM, themed via VS Code CSS variables.
 
-interface LogEntry {
-    id: number;
-    ts: number;
-    tsRaw: string;
-    level: string;
-    source?: string;
-    message: string;
-    body: string[];
-    bodyKind?: 'json' | 'text';
-    groupStart?: string;
-    groupEnd?: boolean;
-}
-
-type HostToWebview =
-    | { type: 'init'; entries: LogEntry[]; fileName: string }
-    | { type: 'update'; entries: LogEntry[]; fileName: string };
-
-type WebviewToHost =
-    | { type: 'reload' }
-    | { type: 'info'; text: string };
+import { KNOWN_LEVELS, type HostToWebview, type LogEntry, type WebviewToHost } from '../shared/types';
 
 declare function acquireVsCodeApi(): { postMessage: (m: WebviewToHost) => void; setState: (s: unknown) => void; getState: () => unknown };
 const vscode = acquireVsCodeApi();
@@ -40,7 +21,7 @@ interface PersistedState {
     expanded: number[];
 }
 
-const KNOWN_LEVELS = ['error', 'warning', 'info', 'debug', 'trace', 'log'];
+const KNOWN_LEVELS_LIST: readonly string[] = KNOWN_LEVELS;
 
 const state: {
     entries: LogEntry[];
@@ -375,11 +356,11 @@ function sourceCounts(): Map<string, number> {
 
 function renderLevelFacets(): void {
     const counts = levelCounts();
-    const levels = [...new Set([...KNOWN_LEVELS, ...counts.keys()])];
+    const levels = [...new Set([...KNOWN_LEVELS_LIST, ...counts.keys()])];
     els.levelFacets.innerHTML = '';
     for (const lvl of levels) {
         const count = counts.get(lvl) ?? 0;
-        if (count === 0 && !KNOWN_LEVELS.includes(lvl)) { continue; }
+        if (count === 0 && !KNOWN_LEVELS_LIST.includes(lvl)) { continue; }
         const id = `lvl-${lvl}`;
         const wrap = document.createElement('label');
         wrap.className = `facet level-${lvl}`;

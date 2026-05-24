@@ -6,20 +6,8 @@
 // are treated as continuation of the previous entry's body (e.g. JSON blobs,
 // stack traces, indented sub-lines).
 
-export type LogLevel = 'error' | 'warning' | 'info' | 'debug' | 'trace' | 'log' | string;
-
-export interface LogEntry {
-    id: number;
-    ts: number;          // ms since epoch (parsed from local time)
-    tsRaw: string;       // original timestamp text
-    level: LogLevel;
-    source?: string;
-    message: string;
-    body: string[];      // continuation lines (raw)
-    bodyKind?: 'json' | 'text';
-    groupStart?: string; // group label if message starts a group
-    groupEnd?: boolean;
-}
+import type { LogEntry } from '../shared/types';
+export type { LogEntry, LogLevel } from '../shared/types';
 
 const HEADER_RE = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([A-Za-z]+)\](?: \[([^\]]+)\])? ?(.*)$/;
 const GROUP_START_RE = /^---\s*Start of group:\s*(.*?)\s*---\s*$/;

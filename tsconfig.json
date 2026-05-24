@@ -6,11 +6,12 @@
 			"ES2022"
 		],
 		"sourceMap": true,
-		"rootDir": "src",
+		"rootDir": ".",
 		"strict": true
 	},
 	"include": [
-		"src/**/*"
+		"src/**/*",
+		"shared/**/*"
 	],
 	"exclude": [
 		"media",
