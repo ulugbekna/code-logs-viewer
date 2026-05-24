@@ -23,9 +23,13 @@ function parseTs(raw: string): number {
     ).getTime();
 }
 
-function detectBodyKind(body: string[]): 'json' | 'text' | undefined {
+function detectBodyKind(message: string, body: string[]): 'json' | 'text' | undefined {
     if (body.length === 0) { return undefined; }
-    const first = body.find(l => l.trim().length > 0)?.trim() ?? '';
+    // Find the first non-empty trimmed line, preferring the header message
+    // so that an entry whose JSON opens on the message line ("{") is still
+    // classified as JSON.
+    const candidates = [message, ...body];
+    const first = candidates.find(l => l.trim().length > 0)?.trim() ?? '';
     if (first.startsWith('{') || first.startsWith('[')) { return 'json'; }
     return 'text';
 }
@@ -42,7 +46,7 @@ export function parseLog(text: string): LogEntry[] {
         const m = HEADER_RE.exec(line);
         if (m) {
             if (current) {
-                current.bodyKind = detectBodyKind(current.body);
+                current.bodyKind = detectBodyKind(current.message, current.body);
                 entries.push(current);
             }
             const tsRaw = m[1];
@@ -80,7 +84,7 @@ export function parseLog(text: string): LogEntry[] {
         }
     }
     if (current) {
-        current.bodyKind = detectBodyKind(current.body);
+        current.bodyKind = detectBodyKind(current.message, current.body);
         entries.push(current);
     }
 

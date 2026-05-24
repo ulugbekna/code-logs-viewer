@@ -55,4 +55,47 @@ suite('parser', () => {
 		const round = serializeEntries(parseLog(text));
 		assert.strictEqual(round, text);
 	});
+
+	test('strips UTF-8 BOM', () => {
+		const text = '\uFEFF2026-05-07 18:50:28.343 [info] hi';
+		const entries = parseLog(text);
+		assert.strictEqual(entries.length, 1);
+		assert.strictEqual(entries[0].message, 'hi');
+	});
+
+	test('normalizes CRLF line endings', () => {
+		const text = [
+			'2026-05-07 18:50:28.343 [info] one',
+			'2026-05-07 18:50:28.344 [info] two',
+		].join('\r\n');
+		const entries = parseLog(text);
+		assert.strictEqual(entries.length, 2);
+		assert.strictEqual(entries[0].message, 'one');
+		assert.strictEqual(entries[1].message, 'two');
+	});
+
+	test('headerless prelude becomes a synthetic log entry', () => {
+		const text = [
+			'preamble line',
+			'2026-05-07 18:50:28.343 [info] real',
+		].join('\n');
+		const entries = parseLog(text);
+		assert.strictEqual(entries.length, 2);
+		assert.strictEqual(entries[0].level, 'log');
+		assert.strictEqual(entries[0].tsRaw, '');
+		assert.strictEqual(entries[0].message, 'preamble line');
+		assert.strictEqual(entries[1].message, 'real');
+	});
+
+	test('serializeEntries round-trip with multiple entries and blank body lines', () => {
+		const text = [
+			'2026-05-07 18:50:46.409 [error] [Src] one',
+			'  detail',
+			'',
+			'  more detail',
+			'2026-05-07 18:50:47.000 [info] two',
+		].join('\n');
+		const round = serializeEntries(parseLog(text));
+		assert.strictEqual(round, text);
+	});
 });
