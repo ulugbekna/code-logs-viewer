@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { randomBytes } from 'crypto';
 import { parseLog } from './parser';
 import type { HostToWebview, WebviewToHost } from '../shared/types';
 
@@ -168,7 +169,7 @@ class LogViewerPanel {
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css'));
 		const csp = [
 			`default-src 'none'`,
-			`style-src ${webview.cspSource} 'unsafe-inline'`,
+			`style-src ${webview.cspSource}`,
 			`script-src 'nonce-${nonce}'`,
 			`font-src ${webview.cspSource}`,
 			`img-src ${webview.cspSource} data:`,
@@ -190,8 +191,6 @@ class LogViewerPanel {
 }
 
 function createNonce(): string {
-	const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	let out = '';
-	for (let i = 0; i < 32; i++) { out += chars.charAt(Math.floor(Math.random() * chars.length)); }
-	return out;
+	// CSP nonce: 16 cryptographically random bytes (=128 bits) hex-encoded.
+	return randomBytes(16).toString('hex');
 }
