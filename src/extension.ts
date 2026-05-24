@@ -1,8 +1,8 @@
+import { randomBytes } from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
-import { parseLog } from './parser';
 import type { HostToWebview, WebviewToHost } from '../shared/types';
+import { parseLog } from './parser';
 
 export function activate(context: vscode.ExtensionContext) {
 	const manager = new LogViewerManager(context);
