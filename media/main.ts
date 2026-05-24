@@ -1,6 +1,10 @@
 // Webview UI for the Code Logs Viewer.
 // Vanilla TS + DOM, themed via VS Code CSS variables.
 
+import { escapeHtml } from '../shared/escape';
+import { recomputeFiltered, type FilterOptions } from '../shared/filter';
+import { computeExtractedJson } from '../shared/jsonExtract';
+import { buildHighlightRegex, type SearchOptions } from '../shared/search';
 import { KNOWN_LEVELS, type HostToWebview, type LogEntry, type WebviewToHost } from '../shared/types';
 
 declare function acquireVsCodeApi(): { postMessage: (m: WebviewToHost) => void; setState: (s: unknown) => void; getState: () => unknown };
@@ -253,63 +257,27 @@ function onHostMessage(msg: HostToWebview): void {
 }
 
 // ---------- Filtering ----------
-function buildSearchMatcher(query: string): ((s: string) => boolean) | undefined {
-    const q = query;
-    if (!q) { return undefined; }
-    let re: RegExp;
-    try {
-        const flags = state.persisted.caseSensitive ? 'g' : 'gi';
-        if (state.persisted.regex) {
-            re = new RegExp(q, flags);
-        } else {
-            let pattern = escapeRe(q);
-            if (state.persisted.wholeWord) { pattern = `\\b${pattern}\\b`; }
-            re = new RegExp(pattern, flags);
-        }
-    } catch {
-        return () => false; // invalid regex → no matches
-    }
-    return (s: string) => { re.lastIndex = 0; return re.test(s); };
-}
-
-function escapeRe(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-
-function entryText(e: LogEntry): string {
-    return `${e.tsRaw} ${e.level} ${e.source ?? ''} ${e.message}\n${e.body.join('\n')}`;
+function searchOpts(): SearchOptions {
+    return {
+        caseSensitive: state.persisted.caseSensitive,
+        wholeWord: state.persisted.wholeWord,
+        regex: state.persisted.regex,
+    };
 }
 
 function recompute(): void {
-    const levels = state.persisted.levels;
-    const sources = state.persisted.sources;
-    const anyLevel = !Object.values(levels).some(v => v);
-    const anySource = !Object.values(sources).some(v => v);
-    const tMin = state.persisted.timeMin;
-    const tMax = state.persisted.timeMax;
-    const matcher = buildSearchMatcher(state.persisted.search);
-    const matcher2 = buildSearchMatcher(state.persisted.search2);
-    const filterBySearch = state.persisted.searchMode === 'filter';
-
-    const out: LogEntry[] = [];
-    const matchPositions: number[] = [];
-    for (const e of state.entries) {
-        if (!anyLevel && !levels[e.level]) { continue; }
-        if (!anySource && !(e.source && sources[e.source])) { continue; }
-        if (tMin !== undefined && e.ts && e.ts < tMin) { continue; }
-        if (tMax !== undefined && e.ts && e.ts > tMax) { continue; }
-        const text = entryText(e);
-        const isMatch = matcher ? matcher(text) : false;
-        const isMatch2 = matcher2 ? matcher2(text) : false;
-        if (filterBySearch) {
-            if (matcher && !isMatch) { continue; }
-            if (matcher2 && !isMatch2) { continue; }
-        }
-        // Match navigation tracks primary-search matches; if only the secondary
-        // is set, fall back to secondary so the arrows / counter stay useful.
-        const navMatch = matcher ? isMatch : (matcher2 ? isMatch2 : false);
-        if (navMatch) { matchPositions.push(out.length); }
-        out.push(e);
-    }
-    state.filtered = out;
+    const opts: FilterOptions = {
+        levels: state.persisted.levels,
+        sources: state.persisted.sources,
+        timeMin: state.persisted.timeMin,
+        timeMax: state.persisted.timeMax,
+        search: state.persisted.search,
+        search2: state.persisted.search2,
+        searchOptions: searchOpts(),
+        filterBySearch: state.persisted.searchMode === 'filter',
+    };
+    const { filtered, matchPositions } = recomputeFiltered(state.entries, opts);
+    state.filtered = filtered;
     state.matchPositions = matchPositions;
     if (matchPositions.length === 0) { state.currentMatchIdx = -1; }
     else if (state.currentMatchIdx < 0 || state.currentMatchIdx >= matchPositions.length) { state.currentMatchIdx = 0; }
@@ -644,51 +612,6 @@ function extractJson(e: LogEntry): unknown | undefined {
     return parsed;
 }
 
-function computeExtractedJson(e: LogEntry): unknown | undefined {
-    // 1. Body that is already JSON-shaped.
-    if (e.body.length > 0) {
-        const joined = e.body.join('\n').trim();
-        if (joined.startsWith('{') || joined.startsWith('[')) {
-            try { return JSON.parse(joined); } catch { /* fall through */ }
-        }
-    }
-    // 2. JSON embedded in the message (header line). Find first '{' or '['
-    // and try parsing the largest balanced substring starting there.
-    const msg = e.message;
-    for (let i = 0; i < msg.length; i++) {
-        const c = msg[i];
-        if (c !== '{' && c !== '[') { continue; }
-        const balanced = sliceBalancedJson(msg, i);
-        if (!balanced) { continue; }
-        try { return JSON.parse(balanced); } catch { /* keep searching */ }
-    }
-    return undefined;
-}
-
-function sliceBalancedJson(s: string, start: number): string | undefined {
-    const open = s[start];
-    const close = open === '{' ? '}' : ']';
-    let depth = 0;
-    let inStr = false;
-    let esc = false;
-    for (let i = start; i < s.length; i++) {
-        const c = s[i];
-        if (esc) { esc = false; continue; }
-        if (inStr) {
-            if (c === '\\') { esc = true; }
-            else if (c === '"') { inStr = false; }
-            continue;
-        }
-        if (c === '"') { inStr = true; continue; }
-        if (c === open) { depth++; }
-        else if (c === close) {
-            depth--;
-            if (depth === 0) { return s.slice(start, i + 1); }
-        }
-    }
-    return undefined;
-}
-
 // ---------- Context menu ----------
 function openRowContextMenu(ev: MouseEvent, e: LogEntry): void {
     ev.preventDefault();
@@ -854,35 +777,11 @@ function renderJsonNode(value: unknown, key: string | undefined, depth: number):
 }
 
 // ---------- Highlighting ----------
-function buildHighlightRegex(): RegExp | undefined {
-    const parts: string[] = [];
-    const flags = state.persisted.caseSensitive ? 'g' : 'gi';
-    for (const q of [state.persisted.search, state.persisted.search2]) {
-        if (!q) { continue; }
-        let pattern: string;
-        if (state.persisted.regex) {
-            pattern = q;
-        } else {
-            pattern = escapeRe(q);
-            if (state.persisted.wholeWord) { pattern = `\\b${pattern}\\b`; }
-        }
-        // Wrap each term in a non-capturing group before alternating so
-        // top-level alternations inside a user regex don't change meaning.
-        parts.push(`(?:${pattern})`);
-    }
-    if (parts.length === 0) { return undefined; }
-    try { return new RegExp(parts.join('|'), flags); } catch { return undefined; }
-}
-
 function highlight(text: string): string {
     const safe = escapeHtml(text);
-    const re = buildHighlightRegex();
+    const re = buildHighlightRegex([state.persisted.search, state.persisted.search2], searchOpts());
     if (!re) { return safe; }
     return safe.replace(re, m => `<mark>${m}</mark>`);
-}
-
-function escapeHtml(s: string): string {
-    return s.replace(/[&<>"']/g, c => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'));
 }
 
 // ---------- Minimap ----------

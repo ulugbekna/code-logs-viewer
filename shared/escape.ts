@@ -1,0 +1,14 @@
+// Small, pure escape helpers used by the webview.
+
+export function escapeRe(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function escapeHtml(s: string): string {
+	return s.replace(/[&<>"']/g, c =>
+		c === '&' ? '&amp;'
+			: c === '<' ? '&lt;'
+				: c === '>' ? '&gt;'
+					: c === '"' ? '&quot;'
+						: '&#39;');
+}
