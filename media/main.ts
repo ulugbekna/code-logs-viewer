@@ -36,7 +36,8 @@ const state: {
     wrapped: Set<number>;
     wrapAll: boolean;
     prettyJson: Set<number>;       // entry.id -> show pretty-printed JSON extracted from message/body
-    jsonCache: Map<number, unknown | null>; // memoize extraction (null = no JSON detected)
+    jsonCache: Map<number, unknown>; // memoize extraction; key absent => not yet computed
+    entryTextCache: Map<number, string>; // memoize entryText() for the current entries batch
     matchPositions: number[];      // indices into `filtered` that contain matches
     currentMatchIdx: number;       // pointer within matchPositions
     rowHeights: Map<number, number>; // entry.id -> measured height (when expanded)
@@ -54,6 +55,7 @@ const state: {
     wrapAll: false,
     prettyJson: new Set(),
     jsonCache: new Map(),
+    entryTextCache: new Map(),
     matchPositions: [],
     currentMatchIdx: -1,
     rowHeights: new Map(),
@@ -251,6 +253,7 @@ function onHostMessage(msg: HostToWebview): void {
         state.entries = msg.entries;
         state.fileName = msg.fileName;
         state.jsonCache.clear();
+        state.entryTextCache.clear();
         // On init, prune persisted facet selections for unknown values? Keep them — harmless.
         recomputeAndRender();
     }
@@ -265,6 +268,14 @@ function searchOpts(): SearchOptions {
     };
 }
 
+function cachedEntryText(e: LogEntry): string {
+    const hit = state.entryTextCache.get(e.id);
+    if (hit !== undefined) { return hit; }
+    const t = `${e.tsRaw} ${e.level} ${e.source ?? ''} ${e.message}\n${e.body.join('\n')}`;
+    state.entryTextCache.set(e.id, t);
+    return t;
+}
+
 function recompute(): void {
     const opts: FilterOptions = {
         levels: state.persisted.levels,
@@ -276,7 +287,7 @@ function recompute(): void {
         searchOptions: searchOpts(),
         filterBySearch: state.persisted.searchMode === 'filter',
     };
-    const { filtered, matchPositions } = recomputeFiltered(state.entries, opts);
+    const { filtered, matchPositions } = recomputeFiltered(state.entries, opts, cachedEntryText);
     state.filtered = filtered;
     state.matchPositions = matchPositions;
     if (matchPositions.length === 0) { state.currentMatchIdx = -1; }
@@ -604,11 +615,16 @@ function togglePrettyJson(id: number, on: boolean): void {
 
 // Find a JSON value embedded anywhere in the entry's message or body.
 // Returns the parsed value (object/array/primitive) or undefined if none.
+// `JSON_NONE` is a sentinel so we can distinguish "cached: no JSON found"
+// from a real parsed value of `null`.
+const JSON_NONE: unique symbol = Symbol('json-none');
 function extractJson(e: LogEntry): unknown | undefined {
-    const cached = state.jsonCache.get(e.id);
-    if (cached !== undefined) { return cached === null ? undefined : cached; }
+    if (state.jsonCache.has(e.id)) {
+        const cached = state.jsonCache.get(e.id);
+        return cached === JSON_NONE ? undefined : cached;
+    }
     const parsed = computeExtractedJson(e);
-    state.jsonCache.set(e.id, parsed === undefined ? null : parsed);
+    state.jsonCache.set(e.id, parsed === undefined ? JSON_NONE : parsed);
     return parsed;
 }
 
@@ -731,49 +747,63 @@ function renderJsonNode(value: unknown, key: string | undefined, depth: number):
     if (typeof value === 'string') { node.innerHTML = `${k}<span class="json-string">${highlight(JSON.stringify(value))}</span>`; return node; }
     if (typeof value === 'number' || typeof value === 'boolean') { node.innerHTML = `${k}<span class="json-${typeof value}">${String(value)}</span>`; return node; }
     if (Array.isArray(value)) {
-        const head = document.createElement('div');
-        head.className = 'json-collapsible';
-        head.innerHTML = `${k}<span class="json-toggle">▾</span> <span class="json-bracket">[</span> <span class="muted">${value.length} items</span>`;
-        node.appendChild(head);
-        const children = document.createElement('div');
-        for (let i = 0; i < value.length; i++) { children.appendChild(renderJsonNode(value[i], String(i), depth + 1)); }
-        node.appendChild(children);
-        const close = document.createElement('div');
-        close.style.paddingLeft = `${depth * 12}px`;
-        close.innerHTML = `<span class="json-bracket">]</span>`;
-        node.appendChild(close);
-        head.addEventListener('click', () => {
-            const collapsed = children.style.display === 'none';
-            children.style.display = collapsed ? '' : 'none';
-            close.style.display = collapsed ? '' : 'none';
-            (head.querySelector('.json-toggle') as HTMLElement).textContent = collapsed ? '▾' : '▸';
-        });
+        appendCollapsible(node, k, value.length, '[', ']', depth, (children) => {
+            for (let i = 0; i < value.length; i++) { children.appendChild(renderJsonNode(value[i], String(i), depth + 1)); }
+        }, `${value.length} items`);
         return node;
     }
     if (typeof value === 'object') {
         const obj = value as Record<string, unknown>;
         const keys = Object.keys(obj);
-        const head = document.createElement('div');
-        head.className = 'json-collapsible';
-        head.innerHTML = `${k}<span class="json-toggle">▾</span> <span class="json-bracket">{</span> <span class="muted">${keys.length} keys</span>`;
-        node.appendChild(head);
-        const children = document.createElement('div');
-        for (const ck of keys) { children.appendChild(renderJsonNode(obj[ck], ck, depth + 1)); }
-        node.appendChild(children);
-        const close = document.createElement('div');
-        close.style.paddingLeft = `${depth * 12}px`;
-        close.innerHTML = `<span class="json-bracket">}</span>`;
-        node.appendChild(close);
-        head.addEventListener('click', () => {
-            const collapsed = children.style.display === 'none';
-            children.style.display = collapsed ? '' : 'none';
-            close.style.display = collapsed ? '' : 'none';
-            (head.querySelector('.json-toggle') as HTMLElement).textContent = collapsed ? '▾' : '▸';
-        });
+        appendCollapsible(node, k, keys.length, '{', '}', depth, (children) => {
+            for (const ck of keys) { children.appendChild(renderJsonNode(obj[ck], ck, depth + 1)); }
+        }, `${keys.length} keys`);
         return node;
     }
     node.textContent = String(value);
     return node;
+}
+
+// Collapse-large-by-default threshold: containers with more than this many
+// direct children stay collapsed on initial render so that pretty-printing a
+// massive blob doesn't synchronously build thousands of DOM nodes.
+const JSON_LAZY_THRESHOLD = 32;
+
+function appendCollapsible(
+    node: HTMLElement,
+    keyHtml: string,
+    size: number,
+    open: string,
+    close: string,
+    depth: number,
+    fillChildren: (children: HTMLElement) => void,
+    summary: string,
+): void {
+    const expandedByDefault = size <= JSON_LAZY_THRESHOLD;
+    const head = document.createElement('div');
+    head.className = 'json-collapsible';
+    head.innerHTML = `${keyHtml}<span class="json-toggle">${expandedByDefault ? '▾' : '▸'}</span> <span class="json-bracket">${open}</span> <span class="muted">${summary}</span>`;
+    node.appendChild(head);
+    const children = document.createElement('div');
+    if (!expandedByDefault) { children.style.display = 'none'; }
+    node.appendChild(children);
+    const closeEl = document.createElement('div');
+    closeEl.style.paddingLeft = `${depth * 12}px`;
+    closeEl.innerHTML = `<span class="json-bracket">${close}</span>`;
+    if (!expandedByDefault) { closeEl.style.display = 'none'; }
+    node.appendChild(closeEl);
+
+    let populated = false;
+    const populate = () => { if (!populated) { populated = true; fillChildren(children); } };
+    if (expandedByDefault) { populate(); }
+
+    head.addEventListener('click', () => {
+        const collapsed = children.style.display === 'none';
+        if (collapsed) { populate(); }
+        children.style.display = collapsed ? '' : 'none';
+        closeEl.style.display = collapsed ? '' : 'none';
+        (head.querySelector('.json-toggle') as HTMLElement).textContent = collapsed ? '▾' : '▸';
+    });
 }
 
 // ---------- Highlighting ----------
@@ -799,10 +829,16 @@ function renderMinimap(): void {
     ctx.clearRect(0, 0, w, h);
 
     if (state.entries.length === 0) { return; }
-    const tsList = state.entries.map(e => e.ts).filter(t => t > 0);
-    if (tsList.length === 0) { return; }
-    const tMin = Math.min(...tsList);
-    const tMax = Math.max(...tsList);
+    // Single-pass min/max — avoids RangeError ("too many function arguments")
+    // that Math.min(...arr) hits on very large logs.
+    let tMin = Infinity;
+    let tMax = -Infinity;
+    for (const e of state.entries) {
+        if (!e.ts) { continue; }
+        if (e.ts < tMin) { tMin = e.ts; }
+        if (e.ts > tMax) { tMax = e.ts; }
+    }
+    if (!isFinite(tMin) || !isFinite(tMax)) { return; }
     const range = Math.max(1, tMax - tMin);
 
     const bins = Math.max(40, Math.floor(w));

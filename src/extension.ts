@@ -89,9 +89,11 @@ class LogViewerPanel {
 		} else {
 			// Untitled / in-memory documents: react to in-editor edits and to the
 			// document being closed (e.g., user discards the untitled buffer).
+			// Coalesce rapid edits so a paste of a large log doesn't trigger
+			// one parse per character.
 			vscode.workspace.onDidChangeTextDocument(e => {
 				if (e.document.uri.toString() === this.uri.toString()) {
-					void this.refresh(true);
+					this.scheduleRefresh();
 				}
 			}, null, this.disposables);
 			vscode.workspace.onDidCloseTextDocument(doc => {
@@ -106,9 +108,23 @@ class LogViewerPanel {
 
 	dispose(): void {
 		this.disposeEmitter.fire();
-		while (this.disposables.length) {
-			try { this.disposables.pop()?.dispose(); } catch { /* ignore */ }
+		if (this.refreshTimer !== undefined) {
+			clearTimeout(this.refreshTimer);
+			this.refreshTimer = undefined;
 		}
+		while (this.disposables.length) {
+			try { this.disposables.pop()?.dispose(); } catch (err) { console.error('LogViewerPanel: dispose error', err); }
+		}
+	}
+
+	private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+	private static readonly REFRESH_DEBOUNCE_MS = 150;
+	private scheduleRefresh(): void {
+		if (this.refreshTimer !== undefined) { clearTimeout(this.refreshTimer); }
+		this.refreshTimer = setTimeout(() => {
+			this.refreshTimer = undefined;
+			void this.refresh(true);
+		}, LogViewerPanel.REFRESH_DEBOUNCE_MS);
 	}
 
 	private async refresh(isUpdate = false): Promise<void> {
