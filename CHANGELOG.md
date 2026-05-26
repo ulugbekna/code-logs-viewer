@@ -7,6 +7,10 @@
 - **Logs: Show VS Code Log...** command — pick any `.log` file from the current window's VS Code logs folder (Window, Main, Renderer, Extension Host, and every `LogOutputChannel`) and open it directly in the viewer.
 - Timeline minimap now marks search-match locations: each matching entry is drawn as a thin vertical line at its timestamp, with a thicker bar for the current match (updates as you step through with Enter / Shift+Enter).
 
+### UX
+
+- Timeline minimap brush is much easier to clear: click anywhere on the brush, click the new "✕" handle drawn on it, or press `Esc` (when no input is focused). Tiny accidental drags no longer create a zero-width selection.
+
 ### Performance
 
 - Live log files are now streamed incrementally: when a watched file grows, only the appended tail is read and parsed, and only the new entries are sent to the webview. Makes trace-level Output channels viable without re-parsing the whole file on every flush.

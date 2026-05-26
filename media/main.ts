@@ -126,7 +126,7 @@ root.innerHTML = `
 		<span id="counts" class="muted"></span>
 		<button class="icon-btn" id="copy-diag" title="Copy diagnostic logs">Diag</button>
 	</header>
-	<canvas id="minimap" height="36"></canvas>
+	<canvas id="minimap" height="36" title="Drag to filter to a time range · Click or press Esc to clear"></canvas>
 	<div class="body">
 		<aside class="sidebar">
 			<section>
@@ -258,6 +258,13 @@ els.sourceSearch.addEventListener('input', renderSourceFacets);
 document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault(); els.search.focus(); els.search.select();
+    } else if (e.key === 'Escape') {
+        const t = e.target as HTMLElement | null;
+        const inEditable = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+        if (!inEditable && (state.persisted.timeMin !== undefined || state.persisted.timeMax !== undefined)) {
+            e.preventDefault();
+            clearBrush();
+        }
     }
 });
 
@@ -966,11 +973,28 @@ function renderMinimap(): void {
     }
 
     // Brush overlay
-    if (state.persisted.timeMin !== undefined || state.persisted.timeMax !== undefined) {
+    const hasBrush = state.persisted.timeMin !== undefined || state.persisted.timeMax !== undefined;
+    let closeHandle: { x: number; y: number; r: number } | undefined;
+    if (hasBrush) {
         const xMin = state.persisted.timeMin !== undefined ? ((state.persisted.timeMin - tMin) / range) * w : 0;
         const xMax = state.persisted.timeMax !== undefined ? ((state.persisted.timeMax - tMin) / range) * w : w;
         ctx.fillStyle = cssVar('--vscode-editor-selectionBackground', 'rgba(100,150,255,0.2)');
         ctx.fillRect(xMin, 0, Math.max(1, xMax - xMin), h);
+        // Close handle at the top-right of the brush
+        const r = 7;
+        const cx = Math.min(w - r - 2, Math.max(xMax - r - 2, xMin + r + 2));
+        const cy = r + 2;
+        ctx.fillStyle = cssVar('--vscode-badge-background', '#4d4d4d');
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = cssVar('--vscode-badge-foreground', '#fff');
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - 3, cy - 3); ctx.lineTo(cx + 3, cy + 3);
+        ctx.moveTo(cx + 3, cy - 3); ctx.lineTo(cx - 3, cy + 3);
+        ctx.stroke();
+        closeHandle = { x: cx, y: cy, r: r + 2 };
     }
 
     // Search match markers: bin into pixel columns so the cost is O(width)
@@ -1002,8 +1026,24 @@ function renderMinimap(): void {
     c.onmousedown = (ev) => {
         const rect = c.getBoundingClientRect();
         const startX = ev.clientX - rect.left;
+        const startY = ev.clientY - rect.top;
+
+        // Click on the close handle clears the brush immediately.
+        if (closeHandle) {
+            const dx = startX - closeHandle.x;
+            const dy = startY - closeHandle.y;
+            if (dx * dx + dy * dy <= closeHandle.r * closeHandle.r) {
+                clearBrush();
+                return;
+            }
+        }
+
+        const DRAG_THRESHOLD = 3;
+        let dragged = false;
         const onMove = (mv: MouseEvent) => {
             const curX = Math.max(0, Math.min(rect.width, mv.clientX - rect.left));
+            if (!dragged && Math.abs(curX - startX) < DRAG_THRESHOLD) { return; }
+            dragged = true;
             const a = Math.min(startX, curX); const b = Math.max(startX, curX);
             state.persisted.timeMin = tMin + (a / rect.width) * range;
             state.persisted.timeMax = tMin + (b / rect.width) * range;
@@ -1013,16 +1053,13 @@ function renderMinimap(): void {
         const onUp = () => {
             window.removeEventListener('mousemove', onMove);
             window.removeEventListener('mouseup', onUp);
+            // A click (no drag) clears an existing brush — easier to discover than dblclick.
+            if (!dragged && hasBrush) { clearBrush(); }
         };
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
     };
-    c.ondblclick = () => {
-        state.persisted.timeMin = undefined;
-        state.persisted.timeMax = undefined;
-        saveState();
-        recomputeAndRender();
-    };
+    c.ondblclick = () => { clearBrush(); };
 }
 
 function cssVar(name: string, fallback: string): string {
@@ -1111,6 +1148,14 @@ function clearFilters(): void {
     state.persisted.timeMax = undefined;
     els.search.value = '';
     els.search2.value = '';
+    saveState();
+    recomputeAndRender();
+}
+
+function clearBrush(): void {
+    if (state.persisted.timeMin === undefined && state.persisted.timeMax === undefined) { return; }
+    state.persisted.timeMin = undefined;
+    state.persisted.timeMax = undefined;
     saveState();
     recomputeAndRender();
 }
