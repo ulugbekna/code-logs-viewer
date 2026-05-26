@@ -941,13 +941,12 @@ function renderMinimap(): void {
     const bins = Math.max(40, Math.floor(w));
     const counts = new Array<{ error: number; warning: number; info: number; other: number }>(bins);
     for (let i = 0; i < bins; i++) { counts[i] = { error: 0, warning: 0, info: 0, other: 0 }; }
-    const filteredSet = new Set(state.filtered.map(e => e.id));
 
     for (const e of state.entries) {
         if (!e.ts) { continue; }
         const b = Math.min(bins - 1, Math.floor(((e.ts - tMin) / range) * bins));
         const slot = e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : e.level === 'info' ? 'info' : 'other';
-        counts[b][slot] += filteredSet.has(e.id) ? 1 : 0.15;
+        counts[b][slot] += 1;
     }
 
     const max = counts.reduce((m, c) => Math.max(m, c.error + c.warning + c.info + c.other), 1);
