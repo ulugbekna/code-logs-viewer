@@ -978,8 +978,17 @@ function renderMinimap(): void {
     if (hasBrush) {
         const xMin = state.persisted.timeMin !== undefined ? ((state.persisted.timeMin - tMin) / range) * w : 0;
         const xMax = state.persisted.timeMax !== undefined ? ((state.persisted.timeMax - tMin) / range) * w : w;
-        ctx.fillStyle = cssVar('--vscode-editor-selectionBackground', 'rgba(100,150,255,0.2)');
+        // `--vscode-editor-selectionBackground` is opaque in many themes, which
+        // would hide the histogram. Paint it translucent so the bars stay visible.
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = cssVar('--vscode-editor-selectionBackground', '#6496ff');
         ctx.fillRect(xMin, 0, Math.max(1, xMax - xMin), h);
+        ctx.restore();
+        // Outline so the brush edges remain visible even when translucent.
+        ctx.strokeStyle = cssVar('--vscode-focusBorder', '#3794ff');
+        ctx.lineWidth = 1;
+        ctx.strokeRect(xMin + 0.5, 0.5, Math.max(1, xMax - xMin) - 1, h - 1);
         // Close handle at the top-right of the brush
         const r = 7;
         const cx = Math.min(w - r - 2, Math.max(xMax - r - 2, xMin + r + 2));
