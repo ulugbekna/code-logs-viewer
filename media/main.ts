@@ -973,19 +973,24 @@ function renderMinimap(): void {
         ctx.fillRect(xMin, 0, Math.max(1, xMax - xMin), h);
     }
 
-    // Search match markers: thin vertical lines at the timestamps of entries
-    // that contain a search hit, plus a distinct marker for the current match.
+    // Search match markers: bin into pixel columns so the cost is O(width)
+    // rather than O(matches). Also draw a thicker bar for the current match.
     if (state.matchPositions.length > 0) {
         const markerColor = cssVar('--vscode-minimap-findMatchHighlight', cssVar('--vscode-editor-findMatchHighlightBackground', '#ea5c00'));
-        ctx.fillStyle = markerColor;
+        const wPx = Math.max(1, Math.floor(w));
+        const hit = new Uint8Array(wPx);
         const currentFilteredIdx = state.currentMatchIdx >= 0 ? state.matchPositions[state.currentMatchIdx] : -1;
         let currentX = -1;
         for (const fi of state.matchPositions) {
             const e = state.filtered[fi];
             if (!e || !e.ts) { continue; }
-            const x = ((e.ts - tMin) / range) * w;
-            ctx.fillRect(x, 0, 1, h);
+            const x = Math.min(wPx - 1, Math.max(0, Math.floor(((e.ts - tMin) / range) * wPx)));
+            hit[x] = 1;
             if (fi === currentFilteredIdx) { currentX = x; }
+        }
+        ctx.fillStyle = markerColor;
+        for (let i = 0; i < wPx; i++) {
+            if (hit[i]) { ctx.fillRect(i, 0, 1, h); }
         }
         if (currentX >= 0) {
             ctx.fillStyle = cssVar('--vscode-editor-findMatchBackground', '#a55206');
