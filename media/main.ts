@@ -973,6 +973,26 @@ function renderMinimap(): void {
         ctx.fillRect(xMin, 0, Math.max(1, xMax - xMin), h);
     }
 
+    // Search match markers: thin vertical lines at the timestamps of entries
+    // that contain a search hit, plus a distinct marker for the current match.
+    if (state.matchPositions.length > 0) {
+        const markerColor = cssVar('--vscode-minimap-findMatchHighlight', cssVar('--vscode-editor-findMatchHighlightBackground', '#ea5c00'));
+        ctx.fillStyle = markerColor;
+        const currentFilteredIdx = state.currentMatchIdx >= 0 ? state.matchPositions[state.currentMatchIdx] : -1;
+        let currentX = -1;
+        for (const fi of state.matchPositions) {
+            const e = state.filtered[fi];
+            if (!e || !e.ts) { continue; }
+            const x = ((e.ts - tMin) / range) * w;
+            ctx.fillRect(x, 0, 1, h);
+            if (fi === currentFilteredIdx) { currentX = x; }
+        }
+        if (currentX >= 0) {
+            ctx.fillStyle = cssVar('--vscode-editor-findMatchBackground', '#a55206');
+            ctx.fillRect(currentX - 1, 0, 3, h);
+        }
+    }
+
     // Brush handlers
     c.onmousedown = (ev) => {
         const rect = c.getBoundingClientRect();
@@ -1027,6 +1047,7 @@ function gotoMatch(dir: -1 | 1): void {
     scrollToFilteredIndex(targetIdx);
     renderToolbar();
     renderListWindow();
+    renderMinimap();
 }
 
 function scrollToFilteredIndex(idx: number): void {

@@ -5,6 +5,7 @@
 ### Features
 
 - **Logs: Show VS Code Log...** command — pick any `.log` file from the current window's VS Code logs folder (Window, Main, Renderer, Extension Host, and every `LogOutputChannel`) and open it directly in the viewer.
+- Timeline minimap now marks search-match locations: each matching entry is drawn as a thin vertical line at its timestamp, with a thicker bar for the current match (updates as you step through with Enter / Shift+Enter).
 
 ### Performance
 
