@@ -106,16 +106,16 @@ root.innerHTML = `
 <div class="app">
 	<header class="toolbar">
 		<div class="search-group">
+			<span class="seg" role="group" aria-label="Search behavior">
+				<button class="seg-btn" id="mode-highlight" title="Show all rows; highlight matches">Highlight</button>
+				<button class="seg-btn" id="mode-filter" title="Show only rows that match">Filter</button>
+			</span>
 			<input id="search" type="text" placeholder="Search…" spellcheck="false" />
 			<input id="search2" type="text" placeholder="Within results…" spellcheck="false" title="Further narrow results (AND)" />
 			<button class="icon-btn" id="opt-case" title="Match Case (Alt+C)">Aa</button>
 			<button class="icon-btn" id="opt-word" title="Match Whole Word (Alt+W)">ab</button>
 			<button class="icon-btn" id="opt-regex" title="Use Regular Expression (Alt+R)">.*</button>
 			<button class="icon-btn" id="opt-wrap" title="Wrap long lines">↵</button>
-			<span class="seg" role="group" aria-label="Search behavior">
-				<button class="seg-btn" id="mode-highlight" title="Show all rows; highlight matches">Highlight</button>
-				<button class="seg-btn" id="mode-filter" title="Show only rows that match">Filter</button>
-			</span>
 			<span id="match-count" class="muted"></span>
 			<button class="icon-btn" id="match-prev" title="Previous match (Shift+Enter)">↑</button>
 			<button class="icon-btn" id="match-next" title="Next match (Enter)">↓</button>

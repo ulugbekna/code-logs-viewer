@@ -54,7 +54,7 @@ body {
 .icon-btn.active { background: var(--vscode-inputOption-activeBackground, rgba(100,150,255,0.25)); border-color: var(--vscode-inputOption-activeBorder, transparent); color: var(--vscode-inputOption-activeForeground, inherit); }
 
 /* Segmented mode toggle: Highlight | Filter */
-.seg { display: inline-flex; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 3px; overflow: hidden; margin-left: 4px; }
+.seg { display: inline-flex; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 3px; overflow: hidden; }
 .seg-btn {
 	background: transparent;
 	color: var(--vscode-foreground);
