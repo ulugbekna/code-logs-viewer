@@ -263,6 +263,14 @@ document.addEventListener('keydown', e => {
 
 // ---------- Host message handling ----------
 function onHostMessage(msg: HostToWebview): void {
+    if (msg.type === 'append') {
+        if (msg.entries.length === 0) { return; }
+        state.entries = state.entries.concat(msg.entries);
+        state.fileName = msg.fileName;
+        // Caches are keyed by entry id; existing ids are still valid, so no clear needed.
+        recomputeAndRender();
+        return;
+    }
     if (msg.type === 'init' || msg.type === 'update') {
         state.entries = msg.entries;
         state.fileName = msg.fileName;

@@ -22,12 +22,20 @@
         "command": "code-logs-viewer.open",
         "title": "Open with Log Viewer",
         "category": "Logs"
+      },
+      {
+        "command": "code-logs-viewer.showVSCodeLog",
+        "title": "Show VS Code Log...",
+        "category": "Logs"
       }
     ],
     "menus": {
       "commandPalette": [
         {
           "command": "code-logs-viewer.open"
+        },
+        {
+          "command": "code-logs-viewer.showVSCodeLog"
         }
       ],
       "editor/title": [

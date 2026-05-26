@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Features
+
+- **Logs: Show VS Code Log...** command — pick any `.log` file from the current window's VS Code logs folder (Window, Main, Renderer, Extension Host, and every `LogOutputChannel`) and open it directly in the viewer.
+
+### Performance
+
+- Live log files are now streamed incrementally: when a watched file grows, only the appended tail is read and parsed, and only the new entries are sent to the webview. Makes trace-level Output channels viable without re-parsing the whole file on every flush.
+- File-watcher refreshes are debounced (~150 ms), matching the untitled-document path, so bursty writes don't trigger one parse per flush.
+
 ## 0.1.0
 
 ### Features

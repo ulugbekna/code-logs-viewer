@@ -20,7 +20,8 @@ export interface LogEntry {
 
 export type HostToWebview =
 	| { type: 'init'; entries: LogEntry[]; fileName: string }
-	| { type: 'update'; entries: LogEntry[]; fileName: string };
+	| { type: 'update'; entries: LogEntry[]; fileName: string }
+	| { type: 'append'; entries: LogEntry[]; fileName: string };
 
 export type WebviewToHost =
 	| { type: 'reload' }
