@@ -1,5 +1,7 @@
 # Change Log
 
+## Unreleased
+
 ## 0.2.0
 
 ### Features
